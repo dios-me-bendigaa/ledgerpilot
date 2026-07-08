@@ -10,7 +10,7 @@
     "build": "tsc -p tsconfig.node.json && vite build",
     "dev": "vite",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"electron/**/*.ts\"",
-    "package:mac": "npm run build && electron-builder --mac dmg",
+    "package:mac": "npm run build && electron-builder --mac dmg --$TARGET_ARCH",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
