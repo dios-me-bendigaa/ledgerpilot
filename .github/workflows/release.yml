@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   macos-release:
     runs-on: macos-latest
@@ -21,6 +24,17 @@ jobs:
 
       - name: Install JS dependencies
         run: npm install
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: pip install -r apps/ai-service/requirements.txt
+
+      - name: Verify workspace
+        run: npm run lint && npm run typecheck && npm run test && pytest apps/ai-service/tests
 
       - name: Package desktop app
         run: npm run package:mac --workspace @ledgerpilot/desktop

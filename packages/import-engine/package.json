@@ -1,6 +1,6 @@
 {
   "name": "@ledgerpilot/import-engine",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -18,8 +18,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ledgerpilot/core": "0.1.0",
-    "@ledgerpilot/normalization-engine": "0.1.0"
+    "@ledgerpilot/core": "1.0.0",
+    "@ledgerpilot/normalization-engine": "1.0.0"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.37.0",

@@ -10,6 +10,7 @@ __pycache__/
 venv/
 apps/desktop/out/
 apps/desktop/dist-electron/
+apps/desktop/release/
 apps/desktop/.next/
 apps/desktop/.turbo/
 apps/ai-service/.mypy_cache/

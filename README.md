@@ -2,13 +2,13 @@
 
 Local-first AI-powered personal finance desktop application for macOS.
 
-## Phase 1
+## Version 1.0.0
 
-- Electron + React + TypeScript desktop shell
-- FastAPI AI service shell
-- Local workspace bootstrap
-- Shared domain/config packages
-- CI build, lint, typecheck, test, release scaffolding
+- Electron + React + TypeScript macOS desktop app
+- FastAPI local AI service
+- CSV import, normalization, duplicate detection, and transfer matching
+- SQLite-backed dashboard, goals, advisor, savings optimizer, settings, backup, and export flows
+- GitHub Actions build, test, DMG packaging, and release scaffolding
 
 ## Monorepo
 

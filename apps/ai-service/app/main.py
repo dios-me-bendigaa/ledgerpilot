@@ -130,7 +130,7 @@ class CategorizationResponse(BaseModel):
     suggestions: list[CategorizationSuggestion]
 
 
-app = FastAPI(title="LedgerPilot AI Service", version="0.2.0")
+app = FastAPI(title="LedgerPilot AI Service", version="1.0.0")
 
 
 def _parse_date(value: str) -> date:
