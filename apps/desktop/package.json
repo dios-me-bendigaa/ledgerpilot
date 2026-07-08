@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Local-first AI personal finance desktop app for macOS.",
   "author": "dios-me-bendigaa",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/apps/desktop/electron/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.node.json && vite build",
     "dev": "vite",
@@ -52,6 +52,9 @@
       "dist-electron/**/*",
       "package.json"
     ],
+    "extraMetadata": {
+      "main": "dist-electron/apps/desktop/electron/main.js"
+    },
     "mac": {
       "category": "public.app-category.finance",
       "target": [
