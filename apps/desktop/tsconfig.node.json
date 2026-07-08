@@ -6,7 +6,9 @@
     "outDir": "dist-electron",
     "baseUrl": ".",
     "paths": {
-      "@ledgerpilot/core": ["../../packages/core/src/index.ts"]
+      "@ledgerpilot/core": ["../../packages/core/src/index.ts"],
+      "@ledgerpilot/import-engine": ["../../packages/import-engine/src/index.ts"],
+      "@ledgerpilot/normalization-engine": ["../../packages/normalization-engine/src/index.ts"]
     }
   },
   "include": ["electron"]

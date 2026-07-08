@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@ledgerpilot/core": ["../core/src/index.ts"],
+      "@ledgerpilot/normalization-engine": ["../normalization-engine/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

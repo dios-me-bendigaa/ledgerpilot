@@ -11,6 +11,14 @@ export default defineConfig({
         __dirname,
         '../../packages/core/src/index.ts',
       ),
+      '@ledgerpilot/import-engine': path.resolve(
+        __dirname,
+        '../../packages/import-engine/src/index.ts',
+      ),
+      '@ledgerpilot/normalization-engine': path.resolve(
+        __dirname,
+        '../../packages/normalization-engine/src/index.ts',
+      ),
       '@ledgerpilot/ui': path.resolve(
         __dirname,
         '../../packages/ui/src/index.tsx',
