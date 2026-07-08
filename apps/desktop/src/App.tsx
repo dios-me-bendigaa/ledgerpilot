@@ -191,36 +191,44 @@ export const App = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
   const [error, setError] = useState<string>();
+  const [fatalError, setFatalError] = useState<string>();
 
   const loadWorkspaceState = async () => {
-    const [
-      nextHistory,
-      nextNormalizationHistory,
-      nextTransactionSummary,
-      nextDashboardData,
-      nextReviewTransactions,
-      nextGoals,
-      nextSettings,
-      nextBackups
-    ] = await Promise.all([
-      window.ledgerPilot.imports.history(),
-      window.ledgerPilot.normalization.history(),
-      window.ledgerPilot.transactions.summary(),
-      window.ledgerPilot.dashboard.data(),
-      window.ledgerPilot.transactions.review(),
-      window.ledgerPilot.goals.get(),
-      window.ledgerPilot.settings.get(),
-      window.ledgerPilot.backup.history()
-    ]);
+    try {
+      const [
+        nextHistory,
+        nextNormalizationHistory,
+        nextTransactionSummary,
+        nextDashboardData,
+        nextReviewTransactions,
+        nextGoals,
+        nextSettings,
+        nextBackups
+      ] = await Promise.all([
+        window.ledgerPilot.imports.history(),
+        window.ledgerPilot.normalization.history(),
+        window.ledgerPilot.transactions.summary(),
+        window.ledgerPilot.dashboard.data(),
+        window.ledgerPilot.transactions.review(),
+        window.ledgerPilot.goals.get(),
+        window.ledgerPilot.settings.get(),
+        window.ledgerPilot.backup.history()
+      ]);
 
-    setHistory(nextHistory);
-    setNormalizationHistory(nextNormalizationHistory);
-    setTransactionSummary(nextTransactionSummary);
-    setDashboardData(nextDashboardData);
-    setReviewTransactions(nextReviewTransactions.transactions);
-    setGoals(nextGoals);
-    setSettings(nextSettings.settings);
-    setBackups(nextBackups);
+      setHistory(nextHistory);
+      setNormalizationHistory(nextNormalizationHistory);
+      setTransactionSummary(nextTransactionSummary);
+      setDashboardData(nextDashboardData);
+      setReviewTransactions(nextReviewTransactions.transactions);
+      setGoals(nextGoals);
+      setSettings(nextSettings.settings);
+      setBackups(nextBackups);
+      setFatalError(undefined);
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.stack ?? nextError.message : String(nextError);
+      console.error('LedgerPilot loadWorkspaceState failed', nextError);
+      setFatalError(message);
+    }
   };
 
   useEffect(() => {
@@ -431,6 +439,25 @@ export const App = () => {
   const highestCategoryTotal = maxCategoryTotal(dashboardData.topExpenseCategories) || 1;
   const highestHeatmapTotal =
     dashboardData.spendingCalendar.reduce((current, point) => Math.max(current, point.expenseTotal), 0) || 1;
+
+  if (fatalError) {
+    return (
+      <main className="min-h-screen bg-slate-950 px-8 py-10 text-slate-100">
+        <div className="mx-auto max-w-5xl">
+          <Card className="border-rose-400/20 bg-rose-400/10 p-8">
+            <p className="text-sm uppercase tracking-[0.32em] text-rose-200">LedgerPilot startup error</p>
+            <h1 className="mt-4 text-4xl font-semibold tracking-tight">The app failed while loading local data</h1>
+            <p className="mt-4 text-sm leading-7 text-rose-100">
+              Copy the details below. This is now the exact renderer startup error instead of a blank screen.
+            </p>
+            <pre className="mt-6 overflow-auto rounded-3xl bg-slate-950/80 p-5 text-xs leading-6 text-slate-200">
+              {fatalError}
+            </pre>
+          </Card>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-slate-950 px-8 py-10 text-slate-100">

@@ -514,6 +514,14 @@ const createWindow = async () => {
     void writeLog(`render-process-gone reason=${details.reason} exitCode=${details.exitCode}`);
   });
 
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    void writeLog(`renderer console level=${level} source=${sourceId} line=${line} message=${message}`);
+  });
+
+  mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
+    void writeLog(`preload-error path=${preloadPath} error=${error?.stack ?? error?.message ?? String(error)}`);
+  });
+
   if (isDev) {
     await writeLog('Loading development URL http://localhost:5173');
     await mainWindow.loadURL('http://localhost:5173');
