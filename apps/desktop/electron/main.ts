@@ -110,7 +110,8 @@ const writeCategoryRules = async (payload: CategoryRulesPayload) => {
   await fs.writeFile(getCategoryRulesPath(), JSON.stringify(payload, null, 2), 'utf8');
 };
 
-const initializeDatabase = () => {
+const initializeDatabase = async () => {
+  await fs.mkdir(path.dirname(getDatabasePath()), { recursive: true });
   database = new Database(getDatabasePath());
   database.exec(`
     CREATE TABLE IF NOT EXISTS transactions (
@@ -524,10 +525,12 @@ const createWindow = async () => {
 };
 
 app.whenReady().then(() => {
-  void writeLog('App ready');
-  initializeDatabase();
-  registerIpcHandlers();
-  void ensureWorkspace().then(async () => {
+  void (async () => {
+    await writeLog('App ready');
+    await ensureWorkspace();
+    await initializeDatabase();
+    registerIpcHandlers();
+
     try {
       await createWindow();
     } catch (error) {
@@ -536,7 +539,7 @@ app.whenReady().then(() => {
       );
       throw error;
     }
-  });
+  })();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
