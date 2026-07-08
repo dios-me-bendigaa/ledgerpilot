@@ -7,7 +7,7 @@
   "author": "dios-me-bendigaa",
   "main": "dist-electron/main.js",
   "scripts": {
-    "build:electron": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --format=esm --outdir=dist-electron --external:electron --external:better-sqlite3",
+    "build:electron": "esbuild electron/main.ts --bundle --platform=node --format=esm --outfile=dist-electron/main.js --external:electron --external:better-sqlite3 && esbuild electron/preload.ts --bundle --platform=node --format=cjs --outfile=dist-electron/preload.cjs --external:electron",
     "build": "npm run build:electron && vite build",
     "dev": "vite",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"electron/**/*.ts\"",

@@ -572,7 +572,7 @@ const createWindow = async () => {
     webPreferences: {
       contextIsolation: true,
       sandbox: false,
-      preload: path.join(app.getAppPath(), 'dist-electron', 'preload.js')
+      preload: path.join(app.getAppPath(), 'dist-electron', 'preload.cjs')
     }
   });
 
