@@ -52,6 +52,7 @@ const isDev = !app.isPackaged;
 const workspaceName = 'LedgerPilot';
 
 let database: Database.Database;
+let mainWindow: BrowserWindow | null = null;
 
 const getWorkspaceRoot = () => path.join(app.getPath('appData'), workspaceName);
 const getDatabasePath = () => path.join(getWorkspaceRoot(), 'database', 'ledgerpilot.sqlite');
@@ -480,7 +481,7 @@ const registerIpcHandlers = () => {
 };
 
 const createWindow = async () => {
-  const window = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1480,
     height: 980,
     minWidth: 1240,
@@ -493,28 +494,33 @@ const createWindow = async () => {
     }
   });
 
-  window.on('ready-to-show', () => {
-    void writeLog('Window ready-to-show');
-    window.show();
+  mainWindow.on('closed', () => {
+    void writeLog('Main window closed');
+    mainWindow = null;
   });
 
-  window.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+  mainWindow.on('ready-to-show', () => {
+    void writeLog('Window ready-to-show');
+    mainWindow?.show();
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
     void writeLog(`did-fail-load code=${errorCode} description=${errorDescription}`);
   });
 
-  window.webContents.on('render-process-gone', (_event, details) => {
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
     void writeLog(`render-process-gone reason=${details.reason} exitCode=${details.exitCode}`);
   });
 
   if (isDev) {
     await writeLog('Loading development URL http://localhost:5173');
-    await window.loadURL('http://localhost:5173');
+    await mainWindow.loadURL('http://localhost:5173');
     return;
   }
 
   const indexPath = path.join(app.getAppPath(), 'dist', 'index.html');
   await writeLog(`Loading production file ${indexPath}`);
-  await window.loadFile(indexPath);
+  await mainWindow.loadFile(indexPath);
 };
 
 app.whenReady().then(() => {
