@@ -50,12 +50,17 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "package.json"
+      "package.json",
+      "build/**/*"
     ],
     "extraMetadata": {
       "main": "dist-electron/apps/desktop/electron/main.js"
     },
     "mac": {
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "category": "public.app-category.finance",
       "target": [
         "dmg"

@@ -11,6 +11,13 @@ permissions:
 jobs:
   macos-release:
     runs-on: macos-15
+    env:
+      CSC_LINK: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
+      CSC_KEY_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_PASSWORD }}
+      CSC_IDENTITY_AUTO_DISCOVERY: true
+      APPLE_ID: ${{ secrets.APPLE_NOTARIZATION_APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_APP_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
     steps:
       - name: Checkout
@@ -33,8 +40,19 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r apps/ai-service/requirements.txt
 
+      - name: Validate release signing secrets
+        run: |
+          test -n "$CSC_LINK"
+          test -n "$CSC_KEY_PASSWORD"
+          test -n "$APPLE_ID"
+          test -n "$APPLE_APP_SPECIFIC_PASSWORD"
+          test -n "$APPLE_TEAM_ID"
+
       - name: Verify workspace
         run: npm run lint && npm run typecheck && npm run test && pytest apps/ai-service/tests
+
+      - name: Install notarization helper
+        run: npm install --no-save @electron/notarize
 
       - name: Package desktop app
         run: npm run package:mac --workspace @ledgerpilot/desktop
