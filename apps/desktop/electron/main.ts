@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  type ImportBatch,
   maxImportFilesPerBatch,
   workspaceBlueprint,
   CategoryOverrideRequest,
@@ -288,7 +289,14 @@ const saveCategoryOverride = async (request: CategoryOverrideRequest) => {
 
 const importEngine = new ImportEngine({
   workspaceRoot: getWorkspaceRoot(),
-  onBatchImported: async ({ transactions }) => {
+  onBatchImported: async ({
+    transactions
+  }: {
+    batch: ImportBatch;
+    report: NormalizationReport;
+    transactions: NormalizedTransaction[];
+    history: ImportHistory;
+  }) => {
     persistTransactions(transactions);
   }
 });
