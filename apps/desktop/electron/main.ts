@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { Menu, app, BrowserWindow, dialog, ipcMain } from 'electron';
 import Database from 'better-sqlite3';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -64,6 +64,86 @@ const writeLog = async (message: string) => {
   const line = `[${new Date().toISOString()}] ${message}\n`;
   await fs.mkdir(path.dirname(getLogPath()), { recursive: true });
   await fs.appendFile(getLogPath(), line, 'utf8');
+};
+
+const installApplicationMenu = () => {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'LedgerPilot',
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    },
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Focus Dashboard',
+          accelerator: 'CmdOrCtrl+1',
+          click: () => {
+            mainWindow?.focus();
+          }
+        },
+        { type: 'separator' },
+        { role: 'close' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
+    {
+      label: 'Window',
+      submenu: [{ role: 'minimize' }, { role: 'zoom' }, { role: 'front' }]
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Show Logs Location',
+          click: () => {
+            void dialog.showMessageBox({
+              type: 'info',
+              title: 'LedgerPilot Logs',
+              message: `Logs are stored at:\n${getLogPath()}`
+            });
+          }
+        }
+      ]
+    }
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 };
 
 const readNormalizationReports = async (): Promise<NormalizationHistory> => {
@@ -551,6 +631,7 @@ const createWindow = async () => {
 app.whenReady().then(() => {
   void (async () => {
     await writeLog('App ready');
+    installApplicationMenu();
     try {
       await ensureWorkspace();
       await initializeDatabase();
