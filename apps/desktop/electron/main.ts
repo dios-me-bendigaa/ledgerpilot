@@ -53,6 +53,7 @@ const workspaceName = 'LedgerPilot';
 
 let database: Database.Database;
 let mainWindow: BrowserWindow | null = null;
+let startupError: string | null = null;
 
 const getWorkspaceRoot = () => path.join(app.getPath('appData'), workspaceName);
 const getDatabasePath = () => path.join(getWorkspaceRoot(), 'database', 'ledgerpilot.sqlite');
@@ -519,6 +520,21 @@ const createWindow = async () => {
     return;
   }
 
+  if (startupError) {
+    const startupHtml = `<!doctype html>
+<html>
+  <body style="margin:0;padding:32px;background:#020617;color:#e2e8f0;font-family:system-ui,sans-serif;">
+    <h1 style="margin:0 0 16px;font-size:28px;">LedgerPilot failed to start</h1>
+    <p style="margin:0 0 16px;line-height:1.6;">A startup error occurred before the desktop app could finish loading.</p>
+    <pre style="white-space:pre-wrap;background:#0f172a;border:1px solid #334155;border-radius:16px;padding:16px;line-height:1.5;">${startupError}</pre>
+    <p style="margin-top:16px;color:#94a3b8;">Check ~/Library/Application Support/LedgerPilot/logs/desktop.log for more details.</p>
+  </body>
+</html>`;
+    await writeLog('Loading startup error fallback page');
+    await mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(startupHtml)}`);
+    return;
+  }
+
   const indexPath = path.join(app.getAppPath(), 'dist', 'index.html');
   await writeLog(`Loading production file ${indexPath}`);
   await mainWindow.loadFile(indexPath);
@@ -527,9 +543,15 @@ const createWindow = async () => {
 app.whenReady().then(() => {
   void (async () => {
     await writeLog('App ready');
-    await ensureWorkspace();
-    await initializeDatabase();
-    registerIpcHandlers();
+    try {
+      await ensureWorkspace();
+      await initializeDatabase();
+      registerIpcHandlers();
+      startupError = null;
+    } catch (error) {
+      startupError = error instanceof Error ? error.stack ?? error.message : String(error);
+      await writeLog(`startup initialization failed: ${startupError}`);
+    }
 
     try {
       await createWindow();
