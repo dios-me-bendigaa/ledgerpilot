@@ -1,0 +1,17 @@
+node_modules/
+.turbo/
+dist/
+build/
+coverage/
+.pytest_cache/
+__pycache__/
+*.pyc
+.venv/
+venv/
+apps/desktop/out/
+apps/desktop/.next/
+apps/desktop/.turbo/
+apps/ai-service/.mypy_cache/
+apps/ai-service/.ruff_cache/
+data/
+.local/
