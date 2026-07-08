@@ -5,14 +5,15 @@
   "type": "module",
   "description": "Local-first AI personal finance desktop app for macOS.",
   "author": "dios-me-bendigaa",
-  "main": "dist-electron/apps/desktop/electron/main.js",
+  "main": "dist-electron/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.node.json && vite build",
+    "build:electron": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --format=esm --outdir=dist-electron --external:electron --external:better-sqlite3",
+    "build": "npm run build:electron && vite build",
     "dev": "vite",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"electron/**/*.ts\"",
     "package:mac": "npm run build && electron-builder --mac dmg --$TARGET_ARCH",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
     "@ledgerpilot/core": "1.0.0",
@@ -33,6 +34,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "31.7.7",
     "electron-builder": "^24.13.3",
+    "esbuild": "^0.25.9",
     "eslint": "^9.31.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "tailwindcss": "^3.4.17",
@@ -54,7 +56,7 @@
       "build/**/*"
     ],
     "extraMetadata": {
-      "main": "dist-electron/apps/desktop/electron/main.js"
+      "main": "dist-electron/main.js"
     },
     "mac": {
       "hardenedRuntime": true,
