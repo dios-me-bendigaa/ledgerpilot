@@ -56,6 +56,13 @@ let database: Database.Database;
 const getWorkspaceRoot = () => path.join(app.getPath('appData'), workspaceName);
 const getDatabasePath = () => path.join(getWorkspaceRoot(), 'database', 'ledgerpilot.sqlite');
 const getCategoryRulesPath = () => path.join(getWorkspaceRoot(), 'rules', 'category-rules.json');
+const getLogPath = () => path.join(getWorkspaceRoot(), 'logs', 'desktop.log');
+
+const writeLog = async (message: string) => {
+  const line = `[${new Date().toISOString()}] ${message}\n`;
+  await fs.mkdir(path.dirname(getLogPath()), { recursive: true });
+  await fs.appendFile(getLogPath(), line, 'utf8');
+};
 
 const readNormalizationReports = async (): Promise<NormalizationHistory> => {
   const reportsDirectory = path.join(getWorkspaceRoot(), 'reports');
@@ -486,18 +493,44 @@ const createWindow = async () => {
     }
   });
 
+  window.on('ready-to-show', () => {
+    void writeLog('Window ready-to-show');
+    window.show();
+  });
+
+  window.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+    void writeLog(`did-fail-load code=${errorCode} description=${errorDescription}`);
+  });
+
+  window.webContents.on('render-process-gone', (_event, details) => {
+    void writeLog(`render-process-gone reason=${details.reason} exitCode=${details.exitCode}`);
+  });
+
   if (isDev) {
+    await writeLog('Loading development URL http://localhost:5173');
     await window.loadURL('http://localhost:5173');
     return;
   }
 
-  await window.loadFile(path.join(app.getAppPath(), 'dist', 'index.html'));
+  const indexPath = path.join(app.getAppPath(), 'dist', 'index.html');
+  await writeLog(`Loading production file ${indexPath}`);
+  await window.loadFile(indexPath);
 };
 
 app.whenReady().then(() => {
+  void writeLog('App ready');
   initializeDatabase();
   registerIpcHandlers();
-  void ensureWorkspace().then(createWindow);
+  void ensureWorkspace().then(async () => {
+    try {
+      await createWindow();
+    } catch (error) {
+      await writeLog(
+        `createWindow failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -507,8 +540,17 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  void writeLog('All windows closed');
   shutdownAiService();
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+process.on('uncaughtException', (error) => {
+  void writeLog(`uncaughtException: ${error.stack ?? error.message}`);
+});
+
+process.on('unhandledRejection', (reason) => {
+  void writeLog(`unhandledRejection: ${String(reason)}`);
 });
