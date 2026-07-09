@@ -948,9 +948,16 @@ export const App = () => {
                 <p className="text-sm uppercase tracking-[0.3em] text-violet-300">Goals and optimizer</p>
                 <h2 className="mt-3 text-2xl font-semibold">Unlimited savings goals</h2>
               </div>
-              <Button className="bg-slate-800 text-slate-100 hover:bg-slate-700" onClick={handleAddGoal}>
-                Add goal
-              </Button>
+              <div className="flex gap-3">
+                <Button className="bg-slate-800 text-slate-100 hover:bg-slate-700" onClick={handleAddGoal}>
+                  Add goal
+                </Button>
+                {goals.goals.length > 0 ? (
+                  <Button disabled={isWorking} onClick={handleGenerateSavingsPlan}>
+                    Run optimizer
+                  </Button>
+                ) : null}
+              </div>
             </div>
 
             <div className="mt-6 space-y-4">

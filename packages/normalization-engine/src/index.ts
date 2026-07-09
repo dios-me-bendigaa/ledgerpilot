@@ -65,9 +65,10 @@ const strongCategoryRules: Array<{
     kind: 'income',
     confidence: 0.99,
     keywords: [
-      'salary', 'payroll', 'direct deposit payroll', 'direct deposit pay',
-      'virement salaire', 'depot salaire', 'paie directe', 'virement paie',
-      'biweekly pay', 'bi-weekly pay'
+      'salary', 'payroll', 'direct deposit payroll', 'direct deposit pay', 'direct deposit',
+      'virement salaire', 'depot salaire', 'paie directe', 'virement paie', 'depot paie',
+      'biweekly pay', 'bi-weekly pay', 'remuneration', 'remuner', 'depot direct emploi',
+      'pay deposit', 'employer deposit', 'employer payment'
     ]
   },
   {
@@ -508,40 +509,58 @@ const isTransferLike = (transaction: NormalizedTransaction) =>
     transaction.category,
   );
 
+const dateNeighbours = (date: string): string[] => {
+  const d = new Date(date);
+  const prev = new Date(d);
+  prev.setDate(d.getDate() - 1);
+  const next = new Date(d);
+  next.setDate(d.getDate() + 1);
+  return [prev.toISOString().slice(0, 10), date, next.toISOString().slice(0, 10)];
+};
+
 const markInternalTransfers = (transactions: NormalizedTransaction[]) => {
-  const candidates = new Map<string, TransferCandidate[]>();
+  // Index debit candidates by amount|date — include neighbour dates (±1 day) so cross-account
+  // payments that post on different days (chequing vs credit card) are still matched.
+  const debitIndex = new Map<string, TransferCandidate>();
+  const creditIndex = new Map<string, TransferCandidate[]>();
 
   transactions.forEach((transaction) => {
-    const key = `${Math.abs(transaction.amount).toFixed(2)}|${transaction.postedDate}`;
-    const entry = candidates.get(key) ?? [];
-    entry.push({ transaction, transferLike: isTransferLike(transaction) });
-    candidates.set(key, entry);
+    const amountKey = Math.abs(transaction.amount).toFixed(2);
+    if (transaction.amount < 0 && isTransferLike(transaction)) {
+      const key = `${amountKey}|${transaction.postedDate}`;
+      if (!debitIndex.has(key)) {
+        debitIndex.set(key, { transaction, transferLike: true });
+      }
+    } else if (transaction.amount > 0) {
+      for (const date of dateNeighbours(transaction.postedDate)) {
+        const key = `${amountKey}|${date}`;
+        const bucket = creditIndex.get(key) ?? [];
+        bucket.push({ transaction, transferLike: isTransferLike(transaction) });
+        creditIndex.set(key, bucket);
+      }
+    }
   });
 
-  for (const [key, bucket] of candidates) {
-    if (bucket.length < 2) {
-      continue;
-    }
+  const paired = new Set<string>();
 
-    // Only the outgoing side must be transfer-like (catches card receiving a payment with unknown description)
-    const debit = bucket.find((entry) => entry.transaction.amount < 0 && entry.transferLike);
-    const credit = bucket.find((entry) => entry.transaction.amount > 0);
+  for (const [key, debitEntry] of debitIndex) {
+    if (paired.has(debitEntry.transaction.id)) continue;
+    const credits = creditIndex.get(key) ?? [];
+    const credit = credits.find(
+      (c) => !paired.has(c.transaction.id) && c.transaction.accountName !== debitEntry.transaction.accountName
+    );
+    if (!credit) continue;
 
-    if (!debit || !credit) {
-      continue;
-    }
+    paired.add(debitEntry.transaction.id);
+    paired.add(credit.transaction.id);
 
-    if (debit.transaction.accountName === credit.transaction.accountName) {
-      continue;
-    }
-
-    debit.transaction.isInternalTransfer = true;
+    debitEntry.transaction.isInternalTransfer = true;
     credit.transaction.isInternalTransfer = true;
-    debit.transaction.category = 'internal_transfers';
+    debitEntry.transaction.category = 'internal_transfers';
     credit.transaction.category = 'internal_transfers';
-    debit.transaction.transactionKind = 'internal_transfer';
+    debitEntry.transaction.transactionKind = 'internal_transfer';
     credit.transaction.transactionKind = 'internal_transfer';
-    debit.transaction.transferPairKey = key;
+    debitEntry.transaction.transferPairKey = key;
     credit.transaction.transferPairKey = key;
   }
 };

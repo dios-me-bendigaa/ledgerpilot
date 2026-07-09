@@ -1,6 +1,6 @@
 {
   "name": "@ledgerpilot/desktop",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "type": "module",
   "description": "Local-first AI personal finance desktop app for macOS.",
@@ -72,11 +72,9 @@
       "main": "dist-electron/main.js"
     },
     "mac": {
-      "hardenedRuntime": true,
+      "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "identity": null,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist",
       "category": "public.app-category.finance",
       "artifactName": "${productName}-${version}-${arch}.${ext}",
       "target": [

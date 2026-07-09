@@ -55,6 +55,7 @@ const workspaceName = 'LedgerPilot';
 let database: Database.Database;
 let mainWindow: BrowserWindow | null = null;
 let startupError: string | null = null;
+let isReprocessing = false;
 
 const getWorkspaceRoot = () => path.join(app.getPath('appData'), workspaceName);
 const getDatabasePath = () => path.join(getWorkspaceRoot(), 'database', 'ledgerpilot.sqlite');
@@ -229,26 +230,46 @@ const initializeDatabase = async () => {
   await writeLog(`initializeDatabase ready`);
 };
 
-const persistTransactions = (transactions: NormalizedTransaction[]) => {
-  const insert = database.prepare(`
-    INSERT OR IGNORE INTO transactions (
-      id, batch_id, import_record_id, source_format, account_name, posted_at,
-      posted_date, posted_time, amount, currency, description_raw,
-      merchant_normalized, category, transaction_kind, confidence_score,
-      fingerprint, is_duplicate, is_internal_transfer, transfer_pair_key,
-      requires_review, metadata_json
-    ) VALUES (
-      @id, @batchId, @importRecordId, @sourceFormat, @accountName, @postedAt,
-      @postedDate, @postedTime, @amount, @currency, @descriptionRaw,
-      @merchantNormalized, @category, @transactionKind, @confidenceScore,
-      @fingerprint, @isDuplicate, @isInternalTransfer, @transferPairKey,
-      @requiresReview, @metadataJson
-    )
-  `);
+const persistTransactions = (transactions: NormalizedTransaction[], upsert = false) => {
+  const sql = upsert
+    ? `INSERT INTO transactions (
+        id, batch_id, import_record_id, source_format, account_name, posted_at,
+        posted_date, posted_time, amount, currency, description_raw,
+        merchant_normalized, category, transaction_kind, confidence_score,
+        fingerprint, is_duplicate, is_internal_transfer, transfer_pair_key,
+        requires_review, metadata_json
+      ) VALUES (
+        @id, @batchId, @importRecordId, @sourceFormat, @accountName, @postedAt,
+        @postedDate, @postedTime, @amount, @currency, @descriptionRaw,
+        @merchantNormalized, @category, @transactionKind, @confidenceScore,
+        @fingerprint, @isDuplicate, @isInternalTransfer, @transferPairKey,
+        @requiresReview, @metadataJson
+      ) ON CONFLICT(id) DO UPDATE SET
+        category = excluded.category,
+        transaction_kind = excluded.transaction_kind,
+        is_internal_transfer = excluded.is_internal_transfer,
+        transfer_pair_key = excluded.transfer_pair_key,
+        requires_review = excluded.requires_review,
+        confidence_score = excluded.confidence_score`
+    : `INSERT OR IGNORE INTO transactions (
+        id, batch_id, import_record_id, source_format, account_name, posted_at,
+        posted_date, posted_time, amount, currency, description_raw,
+        merchant_normalized, category, transaction_kind, confidence_score,
+        fingerprint, is_duplicate, is_internal_transfer, transfer_pair_key,
+        requires_review, metadata_json
+      ) VALUES (
+        @id, @batchId, @importRecordId, @sourceFormat, @accountName, @postedAt,
+        @postedDate, @postedTime, @amount, @currency, @descriptionRaw,
+        @merchantNormalized, @category, @transactionKind, @confidenceScore,
+        @fingerprint, @isDuplicate, @isInternalTransfer, @transferPairKey,
+        @requiresReview, @metadataJson
+      )`;
+
+  const stmt = database.prepare(sql);
 
   const transaction = database.transaction((records: NormalizedTransaction[]) => {
     for (const record of records) {
-      insert.run({
+      stmt.run({
         ...record,
         postedTime: record.postedTime ?? null,
         transferPairKey: record.transferPairKey ?? null,
@@ -401,7 +422,7 @@ const importEngine = new ImportEngine({
       `total=${report.summary.totalRows} inserted=${report.summary.insertedTransactions} ` +
       `duplicates=${report.summary.duplicateTransactions} formats=${JSON.stringify(report.summary.sourceFormats)}`
     );
-    persistTransactions(transactions);
+    persistTransactions(transactions, isReprocessing);
     void writeLog(`persistTransactions done non-duplicate count=${transactions.filter((t) => !t.isDuplicate).length}`);
   }
 });
@@ -486,7 +507,12 @@ const registerIpcHandlers = () => {
 
   ipcMain.handle('normalization:rerun-batch', async (_event, batchId: string) => {
     void writeLog(`normalization:rerun-batch batchId=${batchId}`);
-    return importEngine.renormalizeBatch(batchId) as Promise<NormalizationReport | undefined>;
+    isReprocessing = true;
+    try {
+      return await importEngine.renormalizeBatch(batchId) as NormalizationReport | undefined;
+    } finally {
+      isReprocessing = false;
+    }
   });
 
   ipcMain.handle('normalization:history', async () => {
