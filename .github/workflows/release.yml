@@ -15,7 +15,9 @@ jobs:
       matrix:
         include:
           - target_arch: arm64
+            python_arch: arm64
           - target_arch: x64
+            python_arch: x64
     runs-on: macos-15
     env:
       TARGET_ARCH: ${{ matrix.target_arch }}
@@ -37,6 +39,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          architecture: ${{ matrix.python_arch }}
 
       - name: Install Python dependencies
         run: pip install -r apps/ai-service/requirements.txt
@@ -53,7 +56,6 @@ jobs:
             --distpath dist \
             --workpath /tmp/pyinstaller-build \
             --specpath /tmp/pyinstaller-spec \
-            --target-arch universal2 \
             --noconfirm
 
       - name: Package desktop app
