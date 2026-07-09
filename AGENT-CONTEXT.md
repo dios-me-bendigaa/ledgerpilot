@@ -77,6 +77,36 @@ The target product for `v1.0.0` was:
 - `packages/normalization-engine`
   normalization and transaction classification engine
 
+## Git / Remote Access
+
+This repository is pushed to the user's **personal GitHub account**, not the Just Eat GitHub Enterprise account.
+
+### Remote
+
+- `origin = git@github-personal:dios-me-bendigaa/ledgerpilot.git`
+
+### Local SSH isolation
+
+This repo uses a repo-local SSH config so personal GitHub access does not interfere with work credentials.
+
+- SSH config path:
+  - `.local/ssh/config`
+- personal key path:
+  - `.local/ssh/id_ed25519_github_personal`
+
+### Typical push / pull pattern
+
+For agents running locally in this repo:
+
+- normal git commands work because repo-local SSH is already configured
+- if `gh` is needed against `github.com`, prefer:
+  - `GH_HOST=github.com GIT_SSH_COMMAND='ssh -F /absolute/path/to/.local/ssh/config' gh ...`
+
+### Important constraint
+
+- do not assume `gh` is authenticated for `github.com` globally
+- do not use JET / `github.je-labs.com` auth for this repo
+
 ## Implemented Features By Phase
 
 ### Phase 1
@@ -203,6 +233,56 @@ That means:
 - this is acceptable only for personal testing
 - it is not acceptable for broad public distribution
 
+## Local Resource / Storage Expectations
+
+Agents should understand that this app intentionally reserves local disk usage for finance processing.
+
+### App data location
+
+Primary workspace data lives under macOS application support:
+
+- `~/Library/Application Support/LedgerPilot/`
+
+Expected subdirectories:
+
+- `database/`
+- `imports/original/`
+- `imports/processed/`
+- `ai/memory/`
+- `ai/embeddings/`
+- `rules/`
+- `reports/`
+- `logs/`
+- `settings/`
+- `cache/`
+- `backups/`
+
+### Storage implications
+
+On install / first meaningful use, the app may consume local space for:
+
+- copied original CSV files
+- processed CSV copies
+- SQLite database growth
+- AI memory / embeddings
+- logs
+- exports
+- encrypted backups
+
+Agents should preserve the local-first model and not silently move any of this to cloud storage.
+
+### Runtime / performance expectations
+
+The product goal is to remain responsive while processing large transaction volumes.
+
+Future agents should treat these as product requirements:
+
+- background processing where possible
+- no UI hangs during import/normalization
+- incremental data loading
+- memory-aware analytics for large datasets
+- avoid blocking renderer startup with long-running tasks
+
 ## Apple Signing / Notarization Context
 
 Proper public macOS distribution requires Apple Developer assets and GitHub secrets.
@@ -229,6 +309,162 @@ If the app appears to launch but shows a blank window or fails silently:
 5. Confirm architecture of downloaded DMG matches target machine
 6. Confirm whether testing is happening on an old downloaded release vs latest artifact
 
+If the app launches but shows no useful UI:
+
+7. Check whether Electron preload loaded successfully
+8. Check whether renderer fallback UI rendered an explicit startup error
+9. Check whether `BrowserWindow` lifecycle is being preserved
+10. Check that workspace directories exist before SQLite opens
+
+## Product Vision Still Not Fully Met
+
+The current repo has many implemented pieces, but several user-desired product behaviors are still incomplete or need refinement.
+
+Future agents should treat these as **active product goals**, not closed work.
+
+### Workspace-first onboarding
+
+Desired behavior:
+
+1. App home should ask user to:
+   - create a new workspace
+   - or open an existing workspace
+2. Creating a workspace should ask for:
+   - workspace name
+   - financial goal
+   - initial CSV import set
+
+Current state:
+
+- local workspace directories exist conceptually
+- but explicit workspace picker / create-open UX is not yet complete
+
+### CSV batch limit refinement
+
+Desired behavior:
+
+- initial CSV add should be capped at **5 files**, not 10
+- after processing, user should be able to add 5 more
+- new CSVs should be merged with existing history
+- history should be reprocessed and re-sorted chronologically
+
+Current state:
+
+- current import limit is 10
+- incremental merge behavior is partial
+- this still needs redesign to match the user's explicit expectation
+
+### Unknown transaction resolution loop
+
+Desired behavior:
+
+- if AI cannot identify a transaction confidently, ask the user
+- once user clarifies, apply that learning consistently across banks/files for similar transactions
+
+Current state:
+
+- review queue exists
+- category override rules exist
+- but the UX loop is still primitive and needs to become more explicit and user-friendly
+
+### Dashboard fidelity
+
+Desired behavior:
+
+- dashboard should be easy to understand
+- amounts should be accurate to the cent
+- panels should feel trustworthy and accountable
+
+Current state:
+
+- dashboard scaffolding exists
+- visual summaries exist
+- still needs refinement, better charting, and stronger UX polish
+
+### Long-term financial goal coaching
+
+Desired behavior:
+
+- user can define goals like `50k CAD by next year`
+- AI should analyse actual income/expenses
+- AI should propose realistic savings redirections
+- AI should explain what to stop, reduce, or restructure
+- AI should also suggest ways to improve net income or savings if grounded in data
+
+Current state:
+
+- goals and savings plan structures exist
+- rule-based optimizer exists
+- still needs stronger accuracy, clearer UX, and richer financial reasoning
+
+## macOS UX Expectations
+
+The app should behave like a real Mac desktop app, not just a wrapped webpage.
+
+Future agents should explicitly review mature macOS apps and compare LedgerPilot against them for:
+
+- app name menu behavior
+- `File`, `Edit`, `View`, `Window`, `Help` completeness
+- standard keyboard shortcuts
+- About dialog quality
+- window behavior on reopen / close / minimize / fullscreen
+- empty-state design
+- startup error visibility
+- installer feel and first-launch flow
+
+### Current known UX gap
+
+The user reported the app-name top-left dropdown still feels wrong/incomplete even after adding a native menu.
+
+Agents should treat this as unresolved and compare against polished macOS apps before declaring menu UX complete.
+
+## End-to-End Test Charter For Future Agents
+
+Future AI agents should not stop at unit/build checks.
+
+They should create a proper macOS end-to-end validation loop, ideally with multiple interlinked phases.
+
+### Desired end-to-end test plan
+
+1. Create a clean workspace
+2. Import at least 4 realistic synthetic CSVs
+3. Mix multiple bank schemas
+4. Include duplicates and internal transfers
+5. Include clearly labeled salary/income
+6. Include ambiguous transactions
+7. Validate AI review queue triggers for unknowns
+8. Apply user correction and confirm rule reuse
+9. Confirm dashboard updates correctly after import
+10. Add more CSVs later and confirm re-merge/re-sort behavior
+11. Create at least one long-term goal
+12. Run savings optimizer and advisor questions
+13. Run export and backup flows
+14. Verify app survives heavy/large input without crashing
+
+### Stress / hard-input expectations
+
+Test cases should include:
+
+- malformed CSV headers
+- missing amount/date fields
+- large transaction counts
+- many duplicate-looking rows
+- mixed income/refund/transfer patterns
+- long merchant strings
+- user corrections repeated across files
+
+### Quality bar
+
+The target is not “prototype works once.”
+
+The target is:
+
+- no crash on overload
+- no silent blank window
+- useful error surfaces
+- reliable local storage behavior
+- consistent UX across repeated imports
+
 ## Operational Expectations For AI Agents
 
 When continuing work in this repo:
@@ -253,12 +489,16 @@ When working on packaged app bugs:
 
 High-value follow-ups after `v1.0.0`:
 
-1. Add a startup self-check screen that validates workspace, DB, preload, and AI service status
-2. Add end-to-end packaged smoke tests for macOS artifacts
-3. Add real chart components instead of current lightweight visual summaries
-4. Replace rule-based AI with real local model integration via Ollama
-5. Add migration/versioning around settings and DB schema evolution
-6. Add release notes generation and asset naming clarity per architecture
+1. Implement explicit create/open workspace onboarding
+2. Change batch import UX to user-required 5-file incremental flow
+3. Add startup self-check screen that validates workspace, DB, preload, and AI service status
+4. Add end-to-end packaged smoke tests for macOS artifacts
+5. Add real chart components instead of current lightweight visual summaries
+6. Replace rule-based AI with real local model integration via Ollama
+7. Add migration/versioning around settings and DB schema evolution
+8. Review native macOS menu/app-shell behavior against polished desktop apps
+9. Add release notes generation and asset naming clarity per architecture
+10. Add automated multi-phase E2E finance scenarios using synthetic CSV fixtures
 
 ## Most Important Things To Remember
 
