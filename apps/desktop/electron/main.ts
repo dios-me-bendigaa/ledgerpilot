@@ -482,6 +482,11 @@ const registerIpcHandlers = () => {
     return importEngine.resumeFailedBatch(batchId) as Promise<ResumeImportResult>;
   });
 
+  ipcMain.handle('normalization:rerun-batch', async (_event, batchId: string) => {
+    void writeLog(`normalization:rerun-batch batchId=${batchId}`);
+    return importEngine.renormalizeBatch(batchId) as Promise<NormalizationReport | undefined>;
+  });
+
   ipcMain.handle('normalization:history', async () => {
     return readNormalizationReports() as Promise<NormalizationHistory>;
   });

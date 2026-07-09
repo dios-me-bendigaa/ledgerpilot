@@ -16,6 +16,7 @@ import type {
   ImportHistory,
   ImportWorkflowResult,
   NormalizationHistory,
+  NormalizationReport,
   ResumeImportResult,
   ReviewTransaction,
   SavingsPlan,
@@ -32,7 +33,9 @@ const imports = {
 };
 
 const normalization = {
-  history: () => ipcRenderer.invoke('normalization:history') as Promise<NormalizationHistory>
+  history: () => ipcRenderer.invoke('normalization:history') as Promise<NormalizationHistory>,
+  rerunBatch: (batchId: string) =>
+    ipcRenderer.invoke('normalization:rerun-batch', batchId) as Promise<NormalizationReport | undefined>
 };
 
 const transactions = {

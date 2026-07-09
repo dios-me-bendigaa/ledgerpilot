@@ -13,6 +13,7 @@ import type {
   ImportHistory,
   ImportWorkflowResult,
   NormalizationHistory,
+  NormalizationReport,
   ResumeImportResult,
   ReviewTransaction,
   SavingsPlan,
@@ -30,6 +31,7 @@ declare global {
       };
       normalization: {
         history: () => Promise<NormalizationHistory>;
+        rerunBatch: (batchId: string) => Promise<NormalizationReport | undefined>;
       };
       transactions: {
         summary: () => Promise<{

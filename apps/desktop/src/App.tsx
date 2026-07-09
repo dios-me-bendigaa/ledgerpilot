@@ -298,6 +298,20 @@ export const App = () => {
     }
   };
 
+  const handleRerunNormalization = async (batchId: string) => {
+    setIsImporting(true);
+    setError(undefined);
+
+    try {
+      await window.ledgerPilot.normalization.rerunBatch(batchId);
+      await loadWorkspaceState();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Re-processing failed.');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const onDropFiles = async (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDragging(false);
@@ -723,6 +737,7 @@ export const App = () => {
                   const hasRetryableFailures = batch.files.some(
                     (file) => file.status === 'failed' && file.errorCode !== 'DUPLICATE_FILE',
                   );
+                  const hasCompletedFiles = batch.files.some((file) => file.status === 'completed');
 
                   return (
                     <div key={batch.id} className="rounded-2xl bg-slate-950/80 p-4">
@@ -731,15 +746,26 @@ export const App = () => {
                           <p className="text-sm font-medium text-slate-100">{summarizeBatch(batch)}</p>
                           <p className="mt-1 text-xs text-slate-500">{batch.createdAt}</p>
                         </div>
-                        {hasRetryableFailures ? (
-                          <Button
-                            className="bg-slate-800 text-slate-100 hover:bg-slate-700"
-                            disabled={isImporting}
-                            onClick={() => void handleResume(batch.id)}
-                          >
-                            Resume failed
-                          </Button>
-                        ) : null}
+                        <div className="flex gap-2">
+                          {hasCompletedFiles ? (
+                            <Button
+                              className="bg-sky-900/60 text-sky-200 hover:bg-sky-800/60"
+                              disabled={isImporting}
+                              onClick={() => void handleRerunNormalization(batch.id)}
+                            >
+                              Re-process
+                            </Button>
+                          ) : null}
+                          {hasRetryableFailures ? (
+                            <Button
+                              className="bg-slate-800 text-slate-100 hover:bg-slate-700"
+                              disabled={isImporting}
+                              onClick={() => void handleResume(batch.id)}
+                            >
+                              Resume failed
+                            </Button>
+                          ) : null}
+                        </div>
                       </div>
 
                       <ul className="mt-4 space-y-2">

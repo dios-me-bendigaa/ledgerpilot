@@ -299,6 +299,24 @@ export class ImportEngine {
     return this.importFiles(retryableFiles);
   }
 
+  async renormalizeBatch(batchId: string): Promise<NormalizationReport | undefined> {
+    const history = await this.getHistory();
+    const batch = history.batches.find((entry) => entry.id === batchId);
+    if (!batch) {
+      throw new Error('Import batch not found.');
+    }
+    const result = await this.normalizeImportedBatch(batch);
+    if (result && this.onBatchImported) {
+      await this.onBatchImported({
+        batch,
+        report: result.report,
+        transactions: result.transactions,
+        history
+      });
+    }
+    return result?.report;
+  }
+
   private async normalizeImportedBatch(batch: ImportBatch) {
     const successfulSources = batch.files
       .filter((file) => file.status === 'completed' && file.storedProcessedPath)
