@@ -342,6 +342,30 @@ export const App = () => {
     }
   };
 
+  const handleAcceptAllSuggestions = async () => {
+    const nonUnknown = categorySuggestions.suggestions.filter((s) => s.suggestedCategory !== 'unknown');
+    if (nonUnknown.length === 0) return;
+    setIsWorking(true);
+    setError(undefined);
+    try {
+      for (const suggestion of nonUnknown) {
+        const tx = reviewTransactions.find((t) => t.id === suggestion.transactionId);
+        if (!tx) continue;
+        await window.ledgerPilot.categorization.override({
+          transactionId: suggestion.transactionId,
+          merchantNormalized: tx.merchantNormalized,
+          category: suggestion.suggestedCategory
+        });
+      }
+      await loadWorkspaceState();
+      setCategorySuggestions({ suggestions: [] });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Bulk accept failed.');
+    } finally {
+      setIsWorking(false);
+    }
+  };
+
   const handleApplySuggestion = async (transactionId: string, suggestedCategory: ReviewTransaction['currentCategory']) => {
     const reviewTransaction = reviewTransactions.find((transaction) => transaction.id === transactionId);
     if (!reviewTransaction) {
@@ -471,8 +495,6 @@ export const App = () => {
   const monthlyNetValues = dashboardData.monthlyTrend.map((point) => point.netCashFlow);
   const yearlyNetValues = dashboardData.yearlyTrend.map((point) => point.netCashFlow);
   const highestCategoryTotal = maxCategoryTotal(dashboardData.topExpenseCategories) || 1;
-  const highestHeatmapTotal =
-    dashboardData.spendingCalendar.reduce((current, point) => Math.max(current, point.expenseTotal), 0) || 1;
 
   if (fatalError) {
     return (
@@ -643,31 +665,46 @@ export const App = () => {
           </Card>
 
           <Card className="bg-slate-900/60 p-8">
-            <p className="text-sm uppercase tracking-[0.3em] text-amber-300">Spending calendar</p>
-            <div className="mt-6 grid grid-cols-6 gap-2">
-              {dashboardData.spendingCalendar.length === 0 ? (
-                <p className="col-span-6 text-sm text-slate-500">
-                  Calendar heat map appears after the first normalized expenses land in SQLite.
-                </p>
-              ) : (
-                dashboardData.spendingCalendar.map((point) => (
-                  <div
-                    key={point.date}
-                    className="rounded-2xl p-3 text-xs"
-                    style={{
-                      backgroundColor: `rgba(56, 189, 248, ${Math.max(0.15, point.expenseTotal / highestHeatmapTotal)})`
-                    }}
-                    title={`${point.date}: ${formatCurrency(point.expenseTotal)}`}
-                  >
-                    <p className="font-medium text-slate-950">{point.date.slice(8)}</p>
-                    <p className="mt-1 text-[11px] text-slate-950/80">{formatCurrency(point.expenseTotal)}</p>
+            <p className="text-sm uppercase tracking-[0.3em] text-amber-300">Monthly income vs expenses</p>
+            {dashboardData.monthlyTrend.length === 0 ? (
+              <p className="mt-6 text-sm text-slate-500">Chart appears after the first import is normalized.</p>
+            ) : (() => {
+              const months = dashboardData.monthlyTrend.slice(-12);
+              const maxVal = Math.max(...months.flatMap((m) => [m.income, m.expenses]), 1);
+              const BAR_H = 160;
+              const barW = 22;
+              const gap = 6;
+              const groupW = barW * 2 + gap + 16;
+              const svgW = months.length * groupW + 40;
+              return (
+                <div className="mt-6 overflow-x-auto">
+                  <svg viewBox={`0 0 ${svgW} ${BAR_H + 40}`} className="w-full min-w-[480px]">
+                    {months.map((m, i) => {
+                      const x = 20 + i * groupW;
+                      const incH = Math.round((m.income / maxVal) * BAR_H);
+                      const expH = Math.round((m.expenses / maxVal) * BAR_H);
+                      const label = m.label.slice(5);
+                      return (
+                        <g key={m.label}>
+                          <title>{m.label}: income {formatCurrency(m.income)}, expenses {formatCurrency(m.expenses)}</title>
+                          <rect x={x} y={BAR_H - incH} width={barW} height={incH} rx={4} fill="#34d399" opacity={0.85} />
+                          <rect x={x + barW + gap} y={BAR_H - expH} width={barW} height={expH} rx={4} fill="#f87171" opacity={0.85} />
+                          <text x={x + barW} y={BAR_H + 14} textAnchor="middle" fontSize={9} fill="#94a3b8">{label}</text>
+                        </g>
+                      );
+                    })}
+                    <line x1={20} y1={BAR_H} x2={svgW - 10} y2={BAR_H} stroke="#334155" strokeWidth={1} />
+                  </svg>
+                  <div className="mt-2 flex items-center gap-4 text-xs text-slate-400">
+                    <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-400" />Income</span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-red-400" />Expenses</span>
                   </div>
-                ))
-              )}
-            </div>
+                </div>
+              );
+            })()}
 
             <div className="mt-8">
-              <p className="text-sm uppercase tracking-[0.3em] text-emerald-300">Sankey source flows</p>
+              <p className="text-sm uppercase tracking-[0.3em] text-emerald-300">Spending by account → category</p>
               <ul className="mt-4 space-y-3">
                 {dashboardData.sankeyFlows.length === 0 ? (
                   <li className="text-sm text-slate-500">No flow data yet.</li>
@@ -676,7 +713,7 @@ export const App = () => {
                     <li key={`${flow.source}-${flow.target}`} className="rounded-2xl bg-slate-950/80 px-4 py-3 text-sm">
                       <div className="flex items-center justify-between gap-4">
                         <span className="text-slate-400">{flow.source}</span>
-                        <span className="text-slate-500">{'->'}</span>
+                        <span className="text-slate-500">{'→'}</span>
                         <span className="font-medium text-slate-100">{flow.target.replaceAll('_', ' ')}</span>
                         <span className="text-sky-300">{formatCurrency(flow.value)}</span>
                       </div>
@@ -817,11 +854,22 @@ export const App = () => {
                 <p className="text-sm uppercase tracking-[0.3em] text-violet-300">AI categorization</p>
                 <h2 className="mt-3 text-2xl font-semibold">Review queue and learned rules</h2>
               </div>
-              <Button disabled={isWorking || reviewTransactions.length === 0} onClick={handleSuggestCategories}>
-                Suggest categories
-              </Button>
+              <div className="flex gap-2">
+                <Button disabled={isWorking || reviewTransactions.length === 0} onClick={handleSuggestCategories}>
+                  Suggest categories
+                </Button>
+                {categorySuggestions.suggestions.some((s) => s.suggestedCategory !== 'unknown') ? (
+                  <Button
+                    className="bg-emerald-700 text-white hover:bg-emerald-600"
+                    disabled={isWorking}
+                    onClick={handleAcceptAllSuggestions}
+                  >
+                    Accept all ({categorySuggestions.suggestions.filter((s) => s.suggestedCategory !== 'unknown').length})
+                  </Button>
+                ) : null}
+              </div>
             </div>
-            <div className="mt-6 space-y-4">
+            <div className="mt-6 space-y-3">
               {reviewTransactions.length === 0 ? (
                 <p className="text-sm text-slate-400">No low-confidence transactions pending review.</p>
               ) : (
@@ -831,35 +879,53 @@ export const App = () => {
                   );
 
                   return (
-                    <div key={transaction.id} className="rounded-2xl bg-slate-950/80 p-4 text-sm">
-                      <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <p className="font-medium text-slate-100">{transaction.descriptionRaw}</p>
-                          <p className="mt-1 text-slate-500">
-                            {transaction.accountName} | {formatCurrency(transaction.amount)} | {transaction.currentCategory.replaceAll('_', ' ')}
+                    <div key={transaction.id} className="rounded-2xl bg-slate-950/80 p-3 text-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium text-slate-100">{transaction.descriptionRaw}</p>
+                          <p className="mt-0.5 text-xs text-slate-500">
+                            {transaction.accountName} | {formatCurrency(transaction.amount)}
                           </p>
                         </div>
-                        <span className="text-slate-400">{(transaction.confidenceScore * 100).toFixed(0)}%</span>
-                      </div>
-
-                      {suggestion ? (
-                        <div className="mt-4 rounded-2xl border border-sky-400/20 bg-slate-900/70 p-3">
-                          <div className="flex items-center justify-between gap-4">
-                            <div>
-                              <p className="font-medium text-sky-300">
-                                {suggestion.suggestedCategory.replaceAll('_', ' ')}
-                              </p>
-                              <p className="mt-1 text-xs text-slate-400">{suggestion.rationale}</p>
-                            </div>
-                            <Button
-                              className="bg-slate-800 text-slate-100 hover:bg-slate-700"
-                              disabled={isWorking}
-                              onClick={() => void handleApplySuggestion(transaction.id, suggestion.suggestedCategory)}
-                            >
-                              Apply
-                            </Button>
-                          </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <select
+                            className="rounded-xl bg-slate-800 px-2 py-1.5 text-xs text-slate-100 outline-none"
+                            value={suggestion?.suggestedCategory ?? transaction.currentCategory}
+                            onChange={(e) => {
+                              const cat = e.target.value as ReviewTransaction['currentCategory'];
+                              const existing = categorySuggestions.suggestions.filter((s) => s.transactionId !== transaction.id);
+                              setCategorySuggestions({
+                                suggestions: [...existing, {
+                                  transactionId: transaction.id,
+                                  suggestedCategory: cat,
+                                  confidenceScore: 1,
+                                  rationale: 'Manually selected.'
+                                }]
+                              });
+                            }}
+                          >
+                            {(['salary','income','refunds','credit_card_payments','mortgage_payments',
+                              'line_of_credit_payments','bank_transfers','internal_transfers',
+                              'interac_e_transfers','bill_payments','utilities','groceries',
+                              'restaurants','fuel','shopping','travel','insurance','investments',
+                              'interest_charges','interest_income','fees','taxes','unknown'] as const).map((cat) => (
+                              <option key={cat} value={cat}>{cat.replaceAll('_', ' ')}</option>
+                            ))}
+                          </select>
+                          <Button
+                            className="shrink-0 bg-slate-700 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-600"
+                            disabled={isWorking}
+                            onClick={() => void handleApplySuggestion(
+                              transaction.id,
+                              suggestion?.suggestedCategory ?? transaction.currentCategory
+                            )}
+                          >
+                            Apply
+                          </Button>
                         </div>
+                      </div>
+                      {suggestion && suggestion.suggestedCategory !== 'unknown' ? (
+                        <p className="mt-1 text-xs text-sky-400">{suggestion.rationale}</p>
                       ) : null}
                     </div>
                   );

@@ -172,7 +172,11 @@ export const requestSavingsPlan = async (payload: {
   transactions: ReviewTransaction[];
   apiKey?: string;
 }) => {
-  return postJson<SavingsPlan>('/advisor/savings-plan', {
+  const raw = await postJson<{
+    recommendations: Array<{ category: string; title: string; rationale: string; monthly_savings: number; goal_impact_days: number }>;
+    total_monthly_savings: number;
+    goal_forecasts: Array<{ goal_id: string; required_monthly_savings: number; projected_completion_date: string; success_probability: number }>;
+  }>('/advisor/savings-plan', {
     ...providerFields(payload.settings, payload.apiKey),
     question: 'Savings optimizer request',
     dashboard: {
@@ -217,6 +221,23 @@ export const requestSavingsPlan = async (payload: {
       monthly_contribution_target: goal.monthlyContributionTarget
     }))
   });
+
+  return {
+    recommendations: (raw.recommendations ?? []).map((r) => ({
+      category: r.category,
+      title: r.title,
+      rationale: r.rationale,
+      monthlySavings: r.monthly_savings,
+      goalImpactDays: r.goal_impact_days
+    })),
+    totalMonthlySavings: raw.total_monthly_savings ?? 0,
+    goalForecasts: (raw.goal_forecasts ?? []).map((f) => ({
+      goalId: f.goal_id,
+      requiredMonthlySavings: f.required_monthly_savings,
+      projectedCompletionDate: f.projected_completion_date,
+      successProbability: f.success_probability
+    }))
+  } satisfies SavingsPlan;
 };
 
 export const requestCategorySuggestions = async (payload: {
