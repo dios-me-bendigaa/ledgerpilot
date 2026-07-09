@@ -15,9 +15,7 @@ jobs:
       matrix:
         include:
           - target_arch: arm64
-            pyinstaller_arch: arm64
           - target_arch: x64
-            pyinstaller_arch: x86_64
     runs-on: macos-15
     env:
       TARGET_ARCH: ${{ matrix.target_arch }}
@@ -55,7 +53,7 @@ jobs:
             --distpath dist \
             --workpath /tmp/pyinstaller-build \
             --specpath /tmp/pyinstaller-spec \
-            --target-arch ${{ matrix.pyinstaller_arch }} \
+            --target-arch universal2 \
             --noconfirm
 
       - name: Package desktop app
