@@ -72,6 +72,9 @@ declare global {
       exportData: {
         generate: () => Promise<ExportPayload>;
       };
+      workspace: {
+        clear: () => Promise<void>;
+      };
     };
   }
 }

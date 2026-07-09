@@ -88,6 +88,10 @@ const exportData = {
   generate: () => ipcRenderer.invoke('export:data') as Promise<ExportPayload>
 };
 
+const workspace = {
+  clear: () => ipcRenderer.invoke('workspace:clear') as Promise<void>
+};
+
 contextBridge.exposeInMainWorld('ledgerPilot', {
   imports,
   normalization,
@@ -98,5 +102,6 @@ contextBridge.exposeInMainWorld('ledgerPilot', {
   categorization,
   advisor,
   backup,
-  exportData
+  exportData,
+  workspace
 });

@@ -90,7 +90,20 @@ const strongCategoryRules: Array<{
 const normalizeHeader = (header: string) =>
   header.trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
-const parseCsv = (content: string): string[][] => {
+const detectDelimiter = (firstLine: string): ',' | ';' | '\t' => {
+  const commas = (firstLine.match(/,/g) ?? []).length;
+  const semicolons = (firstLine.match(/;/g) ?? []).length;
+  const tabs = (firstLine.match(/\t/g) ?? []).length;
+  if (semicolons > commas && semicolons > tabs) return ';';
+  if (tabs > commas) return '\t';
+  return ',';
+};
+
+const parseCsv = (content: string, delimiter?: ',' | ';' | '\t'): string[][] => {
+  const firstNewline = content.indexOf('\n');
+  const firstLine = firstNewline >= 0 ? content.slice(0, firstNewline) : content;
+  const sep = delimiter ?? detectDelimiter(firstLine);
+
   const rows: string[][] = [];
   let currentCell = '';
   let currentRow: string[] = [];
@@ -110,7 +123,7 @@ const parseCsv = (content: string): string[][] => {
       continue;
     }
 
-    if (character === ',' && !inQuotes) {
+    if (character === sep && !inQuotes) {
       currentRow.push(currentCell.trim());
       currentCell = '';
       continue;
@@ -265,15 +278,18 @@ const parseRecordRows = async (
   logger?: (message: string) => void,
 ): Promise<ParsedTransactionRow[]> => {
   const content = await fs.readFile(filePath, 'utf8');
-  const parsed = parseCsv(content);
+  const firstNewline = content.indexOf('\n');
+  const firstLine = firstNewline >= 0 ? content.slice(0, firstNewline) : content;
+  const delimiter = detectDelimiter(firstLine);
+  const parsed = parseCsv(content, delimiter);
   if (parsed.length < 2) {
-    logger?.(`parseRecordRows file="${record.fileName}" totalRows=${parsed.length} — skipped (no data rows)`);
+    logger?.(`parseRecordRows file="${record.fileName}" delimiter="${delimiter}" totalRows=${parsed.length} — skipped (no data rows)`);
     return [];
   }
 
   const [headers, ...rows] = parsed;
   const sourceFormat = detectSourceFormat(headers);
-  logger?.(`parseRecordRows file="${record.fileName}" rawHeaderCount=${headers.length} headers="${headers.slice(0, 8).join('|')}" format=${sourceFormat}`);
+  logger?.(`parseRecordRows file="${record.fileName}" delimiter="${delimiter}" rawHeaderCount=${headers.length} headers="${headers.slice(0, 8).join('|')}" format=${sourceFormat}`);
 
   const dateIndex = findColumn(headers, [
     'date', 'transaction date', 'posted date', 'posting date',

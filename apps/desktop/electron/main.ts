@@ -593,6 +593,16 @@ const registerIpcHandlers = () => {
     const payload = await buildExportPayload();
     return exportWorkspaceData(getWorkspaceRoot(), payload) as Promise<ExportPayload>;
   });
+
+  ipcMain.handle('workspace:clear', async () => {
+    void writeLog('workspace:clear requested — wiping all user data');
+    database.close();
+    const root = getWorkspaceRoot();
+    await fs.rm(root, { recursive: true, force: true });
+    await ensureWorkspace();
+    await initializeDatabase();
+    void writeLog('workspace:clear done — workspace recreated fresh');
+  });
 };
 
 const createWindow = async () => {

@@ -190,6 +190,7 @@ export const App = () => {
   const [isImporting, setIsImporting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isWorking, setIsWorking] = useState(false);
+  const [clearConfirm, setClearConfirm] = useState(false);
   const [error, setError] = useState<string>();
   const [fatalError, setFatalError] = useState<string>();
 
@@ -395,6 +396,7 @@ export const App = () => {
   };
 
   const handleSaveSettings = async () => {
+    setClearConfirm(false);
     setIsWorking(true);
     setError(undefined);
     try {
@@ -431,6 +433,24 @@ export const App = () => {
       setBackups(await window.ledgerPilot.backup.history());
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Backup creation failed.');
+    } finally {
+      setIsWorking(false);
+    }
+  };
+
+  const handleClearAllData = async () => {
+    if (!clearConfirm) {
+      setClearConfirm(true);
+      return;
+    }
+    setIsWorking(true);
+    setClearConfirm(false);
+    setError(undefined);
+    try {
+      await window.ledgerPilot.workspace.clear();
+      await loadWorkspaceState();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Clear failed.');
     } finally {
       setIsWorking(false);
     }
@@ -1112,7 +1132,7 @@ export const App = () => {
                 </label>
               ))}
             </div>
-            <div className="mt-4 flex gap-3">
+            <div className="mt-4 flex flex-wrap gap-3">
               <Button disabled={isWorking} onClick={handleSaveSettings}>
                 Save settings
               </Button>
@@ -1122,7 +1142,19 @@ export const App = () => {
               <Button className="bg-slate-800 text-slate-100 hover:bg-slate-700" disabled={isWorking} onClick={handleExport}>
                 Export local data
               </Button>
+              <Button
+                className={clearConfirm ? 'bg-rose-700 text-white hover:bg-rose-600' : 'bg-slate-800 text-rose-300 hover:bg-slate-700'}
+                disabled={isWorking}
+                onClick={() => void handleClearAllData()}
+              >
+                {clearConfirm ? 'Confirm — delete everything' : 'Clear all data'}
+              </Button>
             </div>
+            {clearConfirm ? (
+              <p className="mt-3 text-xs text-rose-400">
+                This permanently deletes all imported transactions, history, reports, and settings. Click again to confirm, or click elsewhere to cancel.
+              </p>
+            ) : null}
           </Card>
 
           <Card className="bg-slate-900/60 p-8">
