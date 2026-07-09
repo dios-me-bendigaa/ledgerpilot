@@ -250,6 +250,8 @@ const persistTransactions = (transactions: NormalizedTransaction[]) => {
     for (const record of records) {
       insert.run({
         ...record,
+        postedTime: record.postedTime ?? null,
+        transferPairKey: record.transferPairKey ?? null,
         isDuplicate: record.isDuplicate ? 1 : 0,
         isInternalTransfer: record.isInternalTransfer ? 1 : 0,
         requiresReview: record.requiresReview ? 1 : 0
