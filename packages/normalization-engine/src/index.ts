@@ -60,30 +60,153 @@ const strongCategoryRules: Array<{
   confidence: number;
   keywords: string[];
 }> = [
-  { category: 'salary', kind: 'income', confidence: 0.99, keywords: ['salary', 'payroll', 'direct deposit payroll'] },
-  { category: 'refunds', kind: 'refund', confidence: 0.96, keywords: ['refund', 'reversal', 'returned'] },
-  { category: 'credit_card_payments', kind: 'payment', confidence: 0.95, keywords: ['credit card payment', 'visa payment', 'mastercard payment'] },
-  { category: 'mortgage_payments', kind: 'payment', confidence: 0.94, keywords: ['mortgage'] },
-  { category: 'line_of_credit_payments', kind: 'payment', confidence: 0.93, keywords: ['line of credit', 'loc payment'] },
-  { category: 'interac_e_transfers', kind: 'transfer', confidence: 0.94, keywords: ['interac', 'e-transfer', 'etransfer'] },
-  { category: 'bill_payments', kind: 'payment', confidence: 0.92, keywords: ['bill payment', 'pre-authorized debit', 'pad '] },
-  { category: 'utilities', kind: 'expense', confidence: 0.9, keywords: ['hydro', 'electric', 'water', 'internet', 'mobile', 'utility'] },
-  { category: 'groceries', kind: 'expense', confidence: 0.9, keywords: ['grocery', 'supermarket', 'costco', 'walmart', 'loblaws'] },
-  { category: 'restaurants', kind: 'expense', confidence: 0.89, keywords: ['restaurant', 'uber eats', 'doordash', 'cafe', 'coffee'] },
-  { category: 'fuel', kind: 'expense', confidence: 0.89, keywords: ['shell', 'esso', 'petro', 'fuel', 'gas station'] },
-  { category: 'shopping', kind: 'expense', confidence: 0.87, keywords: ['amazon', 'shop', 'store', 'retail'] },
-  { category: 'travel', kind: 'expense', confidence: 0.88, keywords: ['airlines', 'hotel', 'airbnb', 'uber trip', 'lyft'] },
-  { category: 'insurance', kind: 'expense', confidence: 0.9, keywords: ['insurance', 'assurance'] },
-  { category: 'investments', kind: 'transfer', confidence: 0.9, keywords: ['brokerage', 'wealthsimple', 'invest', 'tfsa', 'rrsp'] },
-  { category: 'interest_charges', kind: 'expense', confidence: 0.95, keywords: ['interest charge', 'interest charged'] },
-  { category: 'interest_income', kind: 'income', confidence: 0.95, keywords: ['interest paid', 'interest earned'] },
-  { category: 'fees', kind: 'expense', confidence: 0.94, keywords: ['service fee', 'monthly fee', 'nsf', 'fee'] },
-  { category: 'taxes', kind: 'expense', confidence: 0.93, keywords: ['tax', 'cra', 'revenue agency'] },
+  {
+    category: 'salary',
+    kind: 'income',
+    confidence: 0.99,
+    keywords: [
+      'salary', 'payroll', 'direct deposit payroll', 'direct deposit pay',
+      'virement salaire', 'depot salaire', 'paie directe', 'virement paie',
+      'biweekly pay', 'bi-weekly pay'
+    ]
+  },
+  {
+    category: 'interest_income',
+    kind: 'income',
+    confidence: 0.95,
+    keywords: ['interest paid', 'interest earned', 'interet credite', 'savings interest', 'interest income']
+  },
+  {
+    category: 'refunds',
+    kind: 'refund',
+    confidence: 0.96,
+    keywords: ['refund', 'reversal', 'returned', 'remboursement', 'credit adjustment']
+  },
+  {
+    category: 'credit_card_payments',
+    kind: 'payment',
+    confidence: 0.95,
+    keywords: [
+      'credit card payment', 'visa payment', 'mastercard payment',
+      'paiement carte', 'paiement merci', 'payment thank you',
+      'cc payment', 'crt paymt', 'card payment', 'pmt carte'
+    ]
+  },
+  {
+    category: 'mortgage_payments',
+    kind: 'payment',
+    confidence: 0.94,
+    keywords: ['mortgage', 'hypotheque', 'paiement hypotheque']
+  },
+  {
+    category: 'line_of_credit_payments',
+    kind: 'payment',
+    confidence: 0.93,
+    keywords: ['line of credit', 'loc payment', 'marge de credit', 'avance marge', 'ligne de credit', 'credit line advance']
+  },
+  {
+    category: 'interac_e_transfers',
+    kind: 'transfer',
+    confidence: 0.94,
+    keywords: ['interac', 'e-transfer', 'etransfer', 'virement interac']
+  },
+  {
+    category: 'bill_payments',
+    kind: 'payment',
+    confidence: 0.92,
+    keywords: ['bill payment', 'pre-authorized debit', 'pad ', 'paiement facture', 'debit preautori', 'preauthorized payment']
+  },
+  {
+    category: 'utilities',
+    kind: 'expense',
+    confidence: 0.9,
+    keywords: [
+      'hydro', 'electric', 'water bill', 'internet', 'utility',
+      'bell canada', 'rogers', 'telus', 'videotron', 'cogeco', 'shaw',
+      'hydro-quebec', 'hydro quebec', 'enbridge', 'naturgy'
+    ]
+  },
+  {
+    category: 'groceries',
+    kind: 'expense',
+    confidence: 0.9,
+    keywords: [
+      'grocery', 'supermarket', 'costco', 'walmart', 'wal mart', 'loblaws',
+      'sobeys', 'provigo', 'no frills', 'food basics', 'freshco', 'farm boy', 'longos',
+      'whole foods', 'maxi ', 'super c', 'iga ', 'metro '
+    ]
+  },
+  {
+    category: 'restaurants',
+    kind: 'expense',
+    confidence: 0.89,
+    keywords: [
+      'restaurant', 'uber eats', 'doordash', 'cafe', 'coffee',
+      'tim hortons', 'tims ', 'starbucks', 'mcdonald', 'harvey harvey',
+      'burger king', 'wendys', 'subway', 'pizza', 'sushi',
+      'skip the dishes', 'skipthedishes', 'boulangerie', 'patisserie'
+    ]
+  },
+  {
+    category: 'fuel',
+    kind: 'expense',
+    confidence: 0.89,
+    keywords: ['shell', 'esso', 'petro', 'fuel', 'gas station', 'ultramar', 'couche tard', 'circle k']
+  },
+  {
+    category: 'shopping',
+    kind: 'expense',
+    confidence: 0.87,
+    keywords: [
+      'amazon', 'shop', 'store', 'retail',
+      'canadian tire', 'best buy', 'ikea', 'dollarama', 'sport chek',
+      'winners', 'homesense', 'marshalls', 'simons', 'roots'
+    ]
+  },
+  {
+    category: 'travel',
+    kind: 'expense',
+    confidence: 0.88,
+    keywords: [
+      'airlines', 'hotel', 'airbnb', 'uber trip', 'uber', 'lyft', 'taxi',
+      'air canada', 'westjet', 'via rail', 'expedia', 'booking.com'
+    ]
+  },
+  {
+    category: 'insurance',
+    kind: 'expense',
+    confidence: 0.9,
+    keywords: ['insurance', 'assurance', 'intact', 'desjardins assurance']
+  },
+  {
+    category: 'investments',
+    kind: 'transfer',
+    confidence: 0.9,
+    keywords: ['brokerage', 'wealthsimple', 'invest', 'tfsa', 'rrsp', 'questrade', 'disnat', 'placement']
+  },
+  {
+    category: 'interest_charges',
+    kind: 'expense',
+    confidence: 0.95,
+    keywords: ['interest charge', 'interest charged', 'interet debit', 'frais interet']
+  },
+  {
+    category: 'fees',
+    kind: 'expense',
+    confidence: 0.94,
+    keywords: ['service fee', 'monthly fee', 'nsf', 'frais mensuel', 'frais de service']
+  },
+  {
+    category: 'taxes',
+    kind: 'expense',
+    confidence: 0.93,
+    keywords: ['tax', 'cra', 'revenue agency', 'impot', 'revenu canada', 'agence revenu']
+  },
   {
     category: 'bank_transfers',
     kind: 'transfer',
     confidence: 0.85,
-    keywords: ['transfer to', 'transfer from', 'account transfer', 'online transfer']
+    keywords: ['transfer to', 'transfer from', 'account transfer', 'online transfer', 'virement', 'transfert']
   }
 ];
 
@@ -228,6 +351,8 @@ const parseDateValue = (dateValue: string, timeValue?: string) => {
 const normalizeMerchant = (description: string) =>
   description
     .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')  // strip combining accent marks: e.g. é\u2192e
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -257,18 +382,11 @@ const classifyTransaction = (descriptionRaw: string, amount: number) => {
     }
   }
 
-  if (amount > 0) {
-    return {
-      category: 'income' as const,
-      transactionKind: 'income' as const,
-      confidenceScore: 0.72
-    };
-  }
-
+  // Unknown transactions go to review queue regardless of sign
   return {
     category: 'unknown' as const,
-    transactionKind: 'expense' as const,
-    confidenceScore: 0.45
+    transactionKind: amount > 0 ? ('income' as const) : ('expense' as const),
+    confidenceScore: 0.4
   };
 };
 
@@ -405,8 +523,9 @@ const markInternalTransfers = (transactions: NormalizedTransaction[]) => {
       continue;
     }
 
+    // Only the outgoing side must be transfer-like (catches card receiving a payment with unknown description)
     const debit = bucket.find((entry) => entry.transaction.amount < 0 && entry.transferLike);
-    const credit = bucket.find((entry) => entry.transaction.amount > 0 && entry.transferLike);
+    const credit = bucket.find((entry) => entry.transaction.amount > 0);
 
     if (!debit || !credit) {
       continue;

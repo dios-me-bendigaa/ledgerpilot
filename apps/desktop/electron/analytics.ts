@@ -39,7 +39,7 @@ const makeComparison = (currentPeriod: number, previousPeriod: number): Dashboar
 const getAggregateRow = (database: Database.Database, whereClause?: string) => {
   const query = `
     SELECT
-      SUM(CASE WHEN amount > 0 AND is_internal_transfer = 0 THEN amount ELSE 0 END) as income,
+      SUM(CASE WHEN category IN ('salary', 'interest_income', 'refunds') AND is_internal_transfer = 0 AND amount > 0 THEN amount ELSE 0 END) as income,
       ABS(SUM(CASE WHEN amount < 0 AND is_internal_transfer = 0 THEN amount ELSE 0 END)) as expenses,
       ABS(SUM(CASE WHEN category = 'interest_charges' THEN amount ELSE 0 END)) as interestPaid,
       ABS(SUM(CASE WHEN category IN ('credit_card_payments', 'mortgage_payments', 'line_of_credit_payments') THEN amount ELSE 0 END)) as debtPayments,
@@ -72,7 +72,7 @@ const getTimeSeries = (database: Database.Database, format: string, limit: numbe
     .prepare(
       `SELECT
          strftime('${format}', posted_date) as label,
-         SUM(CASE WHEN amount > 0 AND is_internal_transfer = 0 THEN amount ELSE 0 END) as income,
+         SUM(CASE WHEN category IN ('salary', 'interest_income', 'refunds') AND is_internal_transfer = 0 AND amount > 0 THEN amount ELSE 0 END) as income,
          ABS(SUM(CASE WHEN amount < 0 AND is_internal_transfer = 0 THEN amount ELSE 0 END)) as expenses
        FROM transactions
        GROUP BY label
@@ -145,7 +145,7 @@ const getPeriodNetCashFlow = (database: Database.Database, format: string, key: 
   const row = database
     .prepare(
       `SELECT
-         SUM(CASE WHEN amount > 0 AND is_internal_transfer = 0 THEN amount ELSE 0 END) as income,
+         SUM(CASE WHEN category IN ('salary', 'interest_income', 'refunds') AND is_internal_transfer = 0 AND amount > 0 THEN amount ELSE 0 END) as income,
          ABS(SUM(CASE WHEN amount < 0 AND is_internal_transfer = 0 THEN amount ELSE 0 END)) as expenses
        FROM transactions
        WHERE strftime('${format}', posted_date) = ?`,
