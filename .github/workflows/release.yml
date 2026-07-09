@@ -14,11 +14,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15
-            target_arch: arm64
-          - runner: macos-13
-            target_arch: x64
-    runs-on: ${{ matrix.runner }}
+          - target_arch: arm64
+            pyinstaller_arch: arm64
+          - target_arch: x64
+            pyinstaller_arch: x86_64
+    runs-on: macos-15
     env:
       TARGET_ARCH: ${{ matrix.target_arch }}
 
@@ -46,8 +46,21 @@ jobs:
       - name: Verify workspace
         run: npm run build && npm run lint && npm run typecheck && npm run test && pytest apps/ai-service/tests
 
+      - name: Build Python sidecar
+        run: |
+          cd apps/ai-service
+          python3 -m PyInstaller run.py \
+            --onefile \
+            --name ledgerpilot-ai \
+            --distpath dist \
+            --workpath /tmp/pyinstaller-build \
+            --specpath /tmp/pyinstaller-spec \
+            --target-arch ${{ matrix.pyinstaller_arch }} \
+            --noconfirm
+
       - name: Package desktop app
-        run: npm run package:mac --workspace @ledgerpilot/desktop
+        working-directory: apps/desktop
+        run: npm run build && npx electron-builder --mac dmg --$TARGET_ARCH
 
       - name: Locate DMG artifact
         run: ls apps/desktop/release
