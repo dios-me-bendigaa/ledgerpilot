@@ -144,8 +144,16 @@ const parseCsv = (content: string): string[][] => {
 
 const detectSourceFormat = (headers: string[]): SourceFormat => {
   const normalizedHeaders = headers.map(normalizeHeader);
-  const hasAmount = normalizedHeaders.includes('amount');
-  const hasDebitAndCredit = normalizedHeaders.includes('debit') && normalizedHeaders.includes('credit');
+  const hasAmount = normalizedHeaders.some((h) =>
+    ['amount', 'cad', 'cad amount', 'transaction amount', 'net amount'].includes(h)
+  );
+  const hasDebitLike = normalizedHeaders.some((h) =>
+    ['debit', 'withdrawal', 'withdrawals', 'dr', 'withdrawal amount', 'charges'].includes(h)
+  );
+  const hasCreditLike = normalizedHeaders.some((h) =>
+    ['credit', 'deposit', 'deposits', 'cr', 'deposit amount', 'payments'].includes(h)
+  );
+  const hasDebitAndCredit = hasDebitLike && hasCreditLike;
   const isRbc =
     normalizedHeaders.includes('transaction date') &&
     normalizedHeaders.includes('description 1') &&
@@ -263,21 +271,40 @@ const parseRecordRows = async (
   const [headers, ...rows] = parsed;
   const sourceFormat = detectSourceFormat(headers);
 
-  const dateIndex = findColumn(headers, ['date', 'transaction date', 'posted date', 'posting date']);
+  const dateIndex = findColumn(headers, [
+    'date', 'transaction date', 'posted date', 'posting date',
+    'trans date', 'trn date', 'value date', 'effective date', 'transaction dt'
+  ]);
   const timeIndex = findColumn(headers, ['time']);
-  const amountIndex = findColumn(headers, ['amount', 'cad', 'cad amount', 'cad$']);
-  const debitIndex = findColumn(headers, ['debit', 'withdrawal']);
-  const creditIndex = findColumn(headers, ['credit', 'deposit']);
+  const amountIndex = findColumn(headers, [
+    'amount', 'cad', 'cad amount', 'cad$',
+    'transaction amount', 'net amount', 'cad amount', 'amt'
+  ]);
+  const debitIndex = findColumn(headers, [
+    'debit', 'withdrawal', 'withdrawals', 'withdrawal amount',
+    'dr', 'charges', 'debit amount'
+  ]);
+  const creditIndex = findColumn(headers, [
+    'credit', 'deposit', 'deposits', 'deposit amount',
+    'cr', 'payments', 'credit amount'
+  ]);
   const descriptionIndex = findColumn(headers, [
     'description',
     'description 1',
     'details',
     'merchant',
     'payee',
-    'transaction'
+    'transaction',
+    'narrative',
+    'memo',
+    'reference',
+    'particulars',
+    'transaction details',
+    'trans description',
+    'trn description'
   ]);
-  const description2Index = findColumn(headers, ['description 2']);
-  const accountIndex = findColumn(headers, ['account', 'account name']);
+  const description2Index = findColumn(headers, ['description 2', 'description2', 'memo']);
+  const accountIndex = findColumn(headers, ['account', 'account name', 'account number']);
 
   return rows
     .map((row) => {

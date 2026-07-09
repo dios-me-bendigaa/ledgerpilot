@@ -381,6 +381,8 @@ const saveCategoryOverride = async (request: CategoryOverrideRequest) => {
 const importEngine = new ImportEngine({
   workspaceRoot: getWorkspaceRoot(),
   onBatchImported: async ({
+    batch,
+    report,
     transactions
   }: {
     batch: ImportBatch;
@@ -388,7 +390,13 @@ const importEngine = new ImportEngine({
     transactions: NormalizedTransaction[];
     history: ImportHistory;
   }) => {
+    void writeLog(
+      `normalization complete batchId=${batch.id} ` +
+      `total=${report.summary.totalRows} inserted=${report.summary.insertedTransactions} ` +
+      `duplicates=${report.summary.duplicateTransactions} formats=${JSON.stringify(report.summary.sourceFormats)}`
+    );
     persistTransactions(transactions);
+    void writeLog(`persistTransactions done non-duplicate count=${transactions.filter((t) => !t.isDuplicate).length}`);
   }
 });
 
@@ -450,7 +458,15 @@ const registerIpcHandlers = () => {
   });
 
   ipcMain.handle('imports:start', async (_event, files: ImportFileDescriptor[]) => {
-    return importEngine.importFiles(files) as Promise<ImportWorkflowResult>;
+    void writeLog(`imports:start files=${files.map((f) => f.name).join(', ')}`);
+    try {
+      const result = await importEngine.importFiles(files);
+      void writeLog(`imports:start complete batchId=${result.batch.id} status=${result.batch.status}`);
+      return result as ImportWorkflowResult;
+    } catch (error) {
+      void writeLog(`imports:start error: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+      throw error;
+    }
   });
 
   ipcMain.handle('imports:history', async () => {
