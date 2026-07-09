@@ -1,6 +1,6 @@
 {
   "name": "@ledgerpilot/desktop",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "private": true,
   "type": "module",
   "description": "Local-first AI personal finance desktop app for macOS.",
