@@ -18,6 +18,7 @@ import { NormalizationEngine } from '@ledgerpilot/normalization-engine';
 
 type ImportEngineOptions = {
   workspaceRoot: string;
+  logger?: (message: string) => void;
   onBatchImported?: (payload: {
     batch: ImportBatch;
     report: NormalizationReport;
@@ -81,11 +82,13 @@ const updateBatchCounts = (batch: ImportBatch): ImportBatch => {
 export class ImportEngine {
   private readonly workspaceRoot: string;
   private readonly normalizationEngine: NormalizationEngine;
+  private readonly logger?: (message: string) => void;
   private readonly onBatchImported?: ImportEngineOptions['onBatchImported'];
 
   constructor(options: ImportEngineOptions) {
     this.workspaceRoot = options.workspaceRoot;
     this.normalizationEngine = new NormalizationEngine();
+    this.logger = options.logger;
     this.onBatchImported = options.onBatchImported;
   }
 
@@ -309,10 +312,12 @@ export class ImportEngine {
       return undefined;
     }
 
+    this.logger?.(`normalizeImportedBatch batchId=${batch.id} sources=${successfulSources.map((s) => s.fileName).join(', ')}`);
     const result = await this.normalizationEngine.normalizeBatch({
       batch,
       sources: successfulSources,
-      knownFingerprints: new Set()
+      knownFingerprints: new Set(),
+      logger: this.logger
     });
 
     const reportPath = path.join(this.workspaceRoot, 'reports', `${batch.id}.json`);

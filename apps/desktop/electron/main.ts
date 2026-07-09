@@ -193,8 +193,10 @@ const writeCategoryRules = async (payload: CategoryRulesPayload) => {
 };
 
 const initializeDatabase = async () => {
-  await fs.mkdir(path.dirname(getDatabasePath()), { recursive: true });
-  database = new Database(getDatabasePath());
+  const dbPath = getDatabasePath();
+  await writeLog(`initializeDatabase path=${dbPath}`);
+  await fs.mkdir(path.dirname(dbPath), { recursive: true });
+  database = new Database(dbPath);
   database.exec(`
     CREATE TABLE IF NOT EXISTS transactions (
       id TEXT PRIMARY KEY,
@@ -224,6 +226,7 @@ const initializeDatabase = async () => {
     CREATE INDEX IF NOT EXISTS idx_transactions_account_name ON transactions (account_name);
     CREATE INDEX IF NOT EXISTS idx_transactions_requires_review ON transactions (requires_review);
   `);
+  await writeLog(`initializeDatabase ready`);
 };
 
 const persistTransactions = (transactions: NormalizedTransaction[]) => {
@@ -380,6 +383,7 @@ const saveCategoryOverride = async (request: CategoryOverrideRequest) => {
 
 const importEngine = new ImportEngine({
   workspaceRoot: getWorkspaceRoot(),
+  logger: (message) => void writeLog(`[import] ${message}`),
   onBatchImported: async ({
     batch,
     report,
@@ -402,10 +406,11 @@ const importEngine = new ImportEngine({
 
 const ensureWorkspace = async () => {
   const root = getWorkspaceRoot();
-
+  await writeLog(`ensureWorkspace root=${root}`);
   await Promise.all(
     workspaceBlueprint.map((entry) => fs.mkdir(path.join(root, entry), { recursive: true })),
   );
+  await writeLog(`ensureWorkspace done`);
 };
 
 const toFileDescriptor = async (filePath: string): Promise<ImportFileDescriptor> => {

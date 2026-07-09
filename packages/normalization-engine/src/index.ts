@@ -24,6 +24,7 @@ type NormalizationOptions = {
   batch: ImportBatch;
   sources: NormalizationSource[];
   knownFingerprints: Set<string>;
+  logger?: (message: string) => void;
 };
 
 type NormalizationBatchResult = {
@@ -261,15 +262,18 @@ const classifyTransaction = (descriptionRaw: string, amount: number) => {
 const parseRecordRows = async (
   record: ImportRecord,
   filePath: string,
+  logger?: (message: string) => void,
 ): Promise<ParsedTransactionRow[]> => {
   const content = await fs.readFile(filePath, 'utf8');
   const parsed = parseCsv(content);
   if (parsed.length < 2) {
+    logger?.(`parseRecordRows file="${record.fileName}" totalRows=${parsed.length} — skipped (no data rows)`);
     return [];
   }
 
   const [headers, ...rows] = parsed;
   const sourceFormat = detectSourceFormat(headers);
+  logger?.(`parseRecordRows file="${record.fileName}" rawHeaderCount=${headers.length} headers="${headers.slice(0, 8).join('|')}" format=${sourceFormat}`);
 
   const dateIndex = findColumn(headers, [
     'date', 'transaction date', 'posted date', 'posting date',
@@ -306,7 +310,13 @@ const parseRecordRows = async (
   const description2Index = findColumn(headers, ['description 2', 'description2', 'memo']);
   const accountIndex = findColumn(headers, ['account', 'account name', 'account number']);
 
-  return rows
+  logger?.(
+    `parseRecordRows file="${record.fileName}" columns: ` +
+    `date=${dateIndex} amount=${amountIndex} debit=${debitIndex} ` +
+    `credit=${creditIndex} desc=${descriptionIndex} dataRows=${rows.length}`
+  );
+
+  const mapped = rows
     .map((row) => {
       const dateValue = dateIndex >= 0 ? row[dateIndex] ?? '' : '';
       const timeValue = timeIndex >= 0 ? row[timeIndex] ?? '' : '';
@@ -345,6 +355,12 @@ const parseRecordRows = async (
       } satisfies ParsedTransactionRow;
     })
     .filter((row) => row.descriptionRaw.length > 0 && row.amount !== 0);
+
+  logger?.(
+    `parseRecordRows file="${record.fileName}" accepted=${mapped.length}/${rows.length} ` +
+    `(filtered ${rows.length - mapped.length} rows with empty desc or zero amount)`
+  );
+  return mapped;
 };
 
 const makeFingerprint = (row: ParsedTransactionRow) =>
@@ -435,7 +451,7 @@ export class NormalizationEngine {
         continue;
       }
 
-      parsedRows.push(...(await parseRecordRows(record, source.filePath)));
+      parsedRows.push(...(await parseRecordRows(record, source.filePath, options.logger)));
     }
 
     parsedRows.sort((left, right) => left.postedAt.localeCompare(right.postedAt));
