@@ -2,6 +2,8 @@ node_modules/
 .turbo/
 dist/
 build/
+!apps/desktop/build/
+!apps/desktop/build/entitlements.mac.plist
 coverage/
 .pytest_cache/
 __pycache__/

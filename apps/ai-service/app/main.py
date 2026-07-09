@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
+from app import providers
 
 
 class HealthResponse(BaseModel):
@@ -78,6 +79,9 @@ class AdvisorRequest(BaseModel):
     dashboard: DashboardSnapshot
     transactions: list[TransactionInput] = Field(default_factory=list)
     goals: list[GoalInput] = Field(default_factory=list)
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
 
 
 class AdvisorInsight(BaseModel):
@@ -123,6 +127,9 @@ class CategorizationSuggestion(BaseModel):
 class CategorizationRequest(BaseModel):
     provider: Literal['local-rules', 'ollama', 'openai-compatible']
     transactions: list[TransactionInput]
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
 
 
 class CategorizationResponse(BaseModel):
@@ -335,14 +342,28 @@ def health() -> HealthResponse:
 
 @app.post('/advisor/respond', response_model=AdvisorResponse)
 def advisor_respond(request: AdvisorRequest) -> AdvisorResponse:
+    if request.provider != 'local-rules':
+        result = providers.dispatch_advisor(request)
+        if result is not None:
+            return result
     return _advisor_from_rules(request)
 
 
 @app.post('/advisor/savings-plan', response_model=SavingsPlanResponse)
 def advisor_savings_plan(request: AdvisorRequest) -> SavingsPlanResponse:
-    return _savings_plan_from_rules(request)
+    local = _savings_plan_from_rules(request)
+    if request.provider != 'local-rules':
+        result = providers.dispatch_savings_plan(request)
+        if result is not None:
+            result.goal_forecasts = local.goal_forecasts
+            return result
+    return local
 
 
 @app.post('/categorization/suggest', response_model=CategorizationResponse)
 def categorization_suggest(request: CategorizationRequest) -> CategorizationResponse:
+    if request.provider != 'local-rules':
+        result = providers.dispatch_categorization(request)
+        if result is not None:
+            return result
     return _categorize_with_rules(request)

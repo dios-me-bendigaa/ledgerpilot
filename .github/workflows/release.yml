@@ -16,7 +16,7 @@ jobs:
         include:
           - runner: macos-15
             target_arch: arm64
-          - runner: macos-15-intel
+          - runner: macos-13
             target_arch: x64
     runs-on: ${{ matrix.runner }}
     env:

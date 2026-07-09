@@ -34,7 +34,11 @@ const postJson = async <T>(endpoint: string, payload: unknown): Promise<T> => {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const ensureAiService = async (desktopAppPath: string) => {
+export const ensureAiService = async (
+  desktopAppPath: string,
+  isPackaged: boolean,
+  resourcesPath: string,
+) => {
   try {
     const response = await fetch(`${aiServiceUrl}/health`);
     if (response.ok) {
@@ -45,17 +49,25 @@ export const ensureAiService = async (desktopAppPath: string) => {
   }
 
   if (!aiProcess) {
-    const repoRoot = path.resolve(desktopAppPath, '..', '..');
-    const servicePath = path.join(repoRoot, 'apps', 'ai-service');
-    aiProcess = spawn(
-      'python3',
-      ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(aiServicePort)],
-      {
-        cwd: servicePath,
-        env: process.env,
-        stdio: 'ignore'
-      },
-    );
+    if (isPackaged) {
+      const binaryPath = path.join(resourcesPath, 'ai-service', 'ledgerpilot-ai');
+      aiProcess = spawn(binaryPath, [], {
+        env: { ...process.env, LEDGER_AI_PORT: String(aiServicePort) },
+        stdio: 'ignore',
+      });
+    } else {
+      const repoRoot = path.resolve(desktopAppPath, '..', '..');
+      const servicePath = path.join(repoRoot, 'apps', 'ai-service');
+      aiProcess = spawn(
+        'python3',
+        ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(aiServicePort)],
+        {
+          cwd: servicePath,
+          env: process.env,
+          stdio: 'ignore',
+        },
+      );
+    }
   }
 
   for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -78,15 +90,23 @@ export const shutdownAiService = () => {
   aiProcess = undefined;
 };
 
+const providerFields = (settings: AppSettings, apiKey?: string) => ({
+  provider: settings.aiProvider,
+  model: settings.providerSettings.ollamaModel ?? 'llama3.1',
+  base_url: settings.providerSettings.apiBaseUrl ?? 'http://127.0.0.1:11434',
+  api_key: apiKey ?? null,
+});
+
 export const requestAdvisorResponse = async (payload: {
   settings: AppSettings;
   dashboard: DashboardData;
   goals: Goal[];
   transactions: ReviewTransaction[];
   question: string;
+  apiKey?: string;
 }) => {
   return postJson<AdvisorResponse>('/advisor/respond', {
-    provider: payload.settings.aiProvider,
+    ...providerFields(payload.settings, payload.apiKey),
     question: payload.question,
     dashboard: {
       generated_at: payload.dashboard.generatedAt,
@@ -150,9 +170,10 @@ export const requestSavingsPlan = async (payload: {
   dashboard: DashboardData;
   goals: Goal[];
   transactions: ReviewTransaction[];
+  apiKey?: string;
 }) => {
   return postJson<SavingsPlan>('/advisor/savings-plan', {
-    provider: payload.settings.aiProvider,
+    ...providerFields(payload.settings, payload.apiKey),
     question: 'Savings optimizer request',
     dashboard: {
       generated_at: payload.dashboard.generatedAt,
@@ -201,6 +222,7 @@ export const requestSavingsPlan = async (payload: {
 export const requestCategorySuggestions = async (payload: {
   settings: AppSettings;
   transactions: ReviewTransaction[];
+  apiKey?: string;
 }) => {
   return postJson<{ provider: string; suggestions: Array<{
     transaction_id: string;
@@ -208,7 +230,7 @@ export const requestCategorySuggestions = async (payload: {
     confidence_score: number;
     rationale: string;
   }> }>('/categorization/suggest', {
-    provider: payload.settings.aiProvider,
+    ...providerFields(payload.settings, payload.apiKey),
     transactions: payload.transactions.map((transaction) => ({
       id: transaction.id,
       account_name: transaction.accountName,

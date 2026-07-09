@@ -9,8 +9,10 @@
   "scripts": {
     "build:electron": "esbuild electron/main.ts --bundle --platform=node --format=esm --outfile=dist-electron/main.js --external:electron --external:better-sqlite3 && esbuild electron/preload.ts --bundle --platform=node --format=cjs --outfile=dist-electron/preload.cjs --external:electron",
     "build": "npm run build:electron && vite build",
-    "dev": "vite",
+    "dev": "concurrently -k -n vite,electron -c cyan,yellow \"vite\" \"npm run dev:electron\"",
+    "dev:electron": "wait-on tcp:127.0.0.1:5173 && npm run build:electron && cross-env NODE_ENV=development electron .",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"electron/**/*.ts\"",
+    "prepackage:mac": "cd ../ai-service && python3 -m PyInstaller run.py --onefile --name ledgerpilot-ai --distpath dist --workpath /tmp/pyinstaller-build --specpath /tmp/pyinstaller-spec --noconfirm",
     "package:mac": "npm run build && electron-builder --mac dmg --$TARGET_ARCH",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
@@ -32,15 +34,20 @@
     "@typescript-eslint/eslint-plugin": "^8.37.0",
     "@typescript-eslint/parser": "^8.37.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
     "electron": "31.7.7",
     "electron-builder": "^24.13.3",
     "esbuild": "^0.25.9",
     "eslint": "^9.31.0",
     "eslint-plugin-react-hooks": "^5.2.0",
+    "postcss": "^8.5.1",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",
     "vite": "^5.4.10",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "wait-on": "^8.0.3"
   },
   "build": {
     "appId": "com.ledgerpilot.desktop",
@@ -55,15 +62,23 @@
       "package.json",
       "build/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "../ai-service/dist/ledgerpilot-ai",
+        "to": "ai-service/ledgerpilot-ai"
+      }
+    ],
     "extraMetadata": {
       "main": "dist-electron/main.js"
     },
     "mac": {
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
+      "identity": null,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "category": "public.app-category.finance",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
       "target": [
         "dmg"
       ]

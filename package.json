@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace @ledgerpilot/core && npm run build --workspace @ledgerpilot/import-engine && npm run build --workspace @ledgerpilot/normalization-engine && npm run build --workspace @ledgerpilot/ui && npm run build --workspace @ledgerpilot/desktop",
+    "build": "npm run build --workspace @ledgerpilot/core && npm run build --workspace @ledgerpilot/normalization-engine && npm run build --workspace @ledgerpilot/import-engine && npm run build --workspace @ledgerpilot/ui && npm run build --workspace @ledgerpilot/desktop",
     "dev": "npm run dev --workspace @ledgerpilot/desktop",
     "lint": "npm run lint --workspace @ledgerpilot/core && npm run lint --workspace @ledgerpilot/import-engine && npm run lint --workspace @ledgerpilot/normalization-engine && npm run lint --workspace @ledgerpilot/ui && npm run lint --workspace @ledgerpilot/desktop",
     "test": "npm run test --workspace @ledgerpilot/core && npm run test --workspace @ledgerpilot/import-engine && npm run test --workspace @ledgerpilot/normalization-engine && npm run test --workspace @ledgerpilot/ui && npm run test --workspace @ledgerpilot/desktop",

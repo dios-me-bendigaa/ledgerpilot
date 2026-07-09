@@ -24,8 +24,12 @@ Set these in the GitHub repository before publishing public releases:
 
 ## Current Release Behaviour
 
-- The release workflow now validates these secrets before packaging.
-- If they are missing, the workflow should fail fast instead of publishing a broken macOS artifact.
+Releases are currently **unsigned personal-test DMGs** — no Apple secrets are configured in the release workflow, no signing or notarization step exists. The workflow publishes ad-hoc signed DMGs for personal testing only.
+
+- DMGs built locally on your own Mac: open directly, no Gatekeeper block.
+- DMGs downloaded from GitHub Releases: macOS quarantines them. Use the workaround below before launching, or right-click → **Open** the first time.
+
+When ready for signed public distribution, configure the five secrets above and add an `electron-builder` signing + notarization step to the release workflow.
 
 ## Immediate Local Workaround
 

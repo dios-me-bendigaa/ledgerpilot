@@ -121,6 +121,10 @@ export const loadSettings = async (workspaceRoot: string): Promise<SettingsPaylo
   };
 };
 
+export const loadApiKey = async (): Promise<string | undefined> => {
+  return getKeychainPassword(apiKeyAccount);
+};
+
 export const saveSettings = async (
   workspaceRoot: string,
   payload: SettingsPayload & { apiKey?: string },

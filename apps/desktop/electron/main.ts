@@ -41,6 +41,7 @@ import {
   createEncryptedBackup,
   deleteGoal,
   exportWorkspaceData,
+  loadApiKey,
   loadBackupHistory,
   loadGoals,
   loadSettings,
@@ -506,10 +507,12 @@ const registerIpcHandlers = () => {
 
   ipcMain.handle('categorization:suggest', async () => {
     const settings = (await loadSettings(getWorkspaceRoot())).settings;
-    await ensureAiService(app.getAppPath());
+    const apiKey = await loadApiKey();
+    await ensureAiService(app.getAppPath(), app.isPackaged, process.resourcesPath);
     const suggestions = await requestCategorySuggestions({
       settings,
-      transactions: getReviewTransactions()
+      transactions: getReviewTransactions(),
+      apiKey,
     });
     return applyCategoryRuleOverrides(suggestions) as Promise<CategorySuggestionPayload>;
   });
@@ -525,25 +528,29 @@ const registerIpcHandlers = () => {
   ipcMain.handle('advisor:ask', async (_event, question: string) => {
     const settings = (await loadSettings(getWorkspaceRoot())).settings;
     const goals = (await loadGoals(getWorkspaceRoot())).goals;
-    await ensureAiService(app.getAppPath());
+    const apiKey = await loadApiKey();
+    await ensureAiService(app.getAppPath(), app.isPackaged, process.resourcesPath);
     return requestAdvisorResponse({
       settings,
       dashboard: getDashboardData(database),
       goals,
       transactions: getRecentTransactions(250),
-      question
+      question,
+      apiKey,
     });
   });
 
   ipcMain.handle('advisor:savings-plan', async () => {
     const settings = (await loadSettings(getWorkspaceRoot())).settings;
     const goals = (await loadGoals(getWorkspaceRoot())).goals;
-    await ensureAiService(app.getAppPath());
+    const apiKey = await loadApiKey();
+    await ensureAiService(app.getAppPath(), app.isPackaged, process.resourcesPath);
     return requestSavingsPlan({
       settings,
       dashboard: getDashboardData(database),
       goals,
-      transactions: getRecentTransactions(250)
+      transactions: getRecentTransactions(250),
+      apiKey,
     }) as Promise<SavingsPlan>;
   });
 
