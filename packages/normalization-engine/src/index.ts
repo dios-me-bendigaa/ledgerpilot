@@ -440,7 +440,6 @@ const bankCategoryMap: Record<string, { category: TransactionCategory; kind: Tra
   'bank fee': { category: 'fees', kind: 'expense' },
   'finances': { category: 'fees', kind: 'expense' },
   'legal': { category: 'fees', kind: 'expense' },
-  'cash': { category: 'bank_transfers', kind: 'transfer' },
   'interest': { category: 'interest_charges', kind: 'expense' }
 };
 
