@@ -23,12 +23,16 @@ describe('spendBucket', () => {
     expect(spendBucket('credit_card_payments', -105)).toBe('transfer');
     expect(spendBucket('line_of_credit_payments', -418)).toBe('transfer');
     expect(spendBucket('investments', -1000)).toBe('transfer');
+    // Debt-servicing categories are surfaced via debtBreakdown KPI, not as expenses
+    expect(spendBucket('mortgage_payments', -1400)).toBe('transfer');
+    expect(spendBucket('car_payments', -418)).toBe('transfer');
+    expect(spendBucket('rent', -2000)).toBe('transfer');
   });
 
   it('treats real spend categories as expense', () => {
     expect(spendBucket('groceries', -82.5)).toBe('expense');
-    expect(spendBucket('mortgage_payments', -1400)).toBe('expense');
     expect(spendBucket('india_expenses', -1100)).toBe('expense');
+    expect(spendBucket('restaurants', -45)).toBe('expense');
   });
 
   it('falls back to sign for unknown', () => {
