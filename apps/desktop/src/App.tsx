@@ -1,6 +1,8 @@
 import {
+  ALL_CATEGORIES,
   maxImportFilesPerBatch,
   type AdvisorResponse,
+  type CustomCategory,
   type AppSettings,
   type BackupHistory,
   type CategorySuggestionPayload,
@@ -35,12 +37,15 @@ const emptyDashboardData: DashboardData = {
     savingsRate: 0,
     interestPaid: 0,
     debtPayments: 0,
+    debtBreakdown: { mortgage: 0, carPayments: 0, rent: 0, creditCard: 0, lineOfCredit: 0, total: 0 },
     budgetHealth: 0,
     financialHealthScore: 0,
     internalTransfers: 0,
     reviewCount: 0
   },
   topExpenseCategories: [],
+  expenseGroups: [],
+  categoryComparisons: [],
   monthlyTrend: [],
   yearlyTrend: [],
   spendingCalendar: [],
@@ -77,7 +82,8 @@ const emptySettings: AppSettings = {
 const emptySavingsPlan: SavingsPlan = {
   recommendations: [],
   totalMonthlySavings: 0,
-  goalForecasts: []
+  goalForecasts: [],
+  financialSummary: []
 };
 
 const formatBytes = (bytes: number) => {
@@ -178,7 +184,12 @@ export const App = () => {
     topCategories: []
   });
   const [reviewTransactions, setReviewTransactions] = useState<ReviewTransaction[]>([]);
+  const [allTransactions, setAllTransactions] = useState<ReviewTransaction[]>([]);
+  const [txnFilter, setTxnFilter] = useState('');
   const [categorySuggestions, setCategorySuggestions] = useState<CategorySuggestionPayload>({ suggestions: [] });
+  const [customCategories, setCustomCategories] = useState<CustomCategory[]>([]);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [newCategoryBucket, setNewCategoryBucket] = useState<'income' | 'expense' | 'transfer'>('expense');
   const [goals, setGoals] = useState<GoalsPayload>({ goals: [] });
   const [settings, setSettings] = useState<AppSettings>(emptySettings);
   const [backups, setBackups] = useState<BackupHistory>({ backups: [] });
@@ -204,7 +215,9 @@ export const App = () => {
         nextReviewTransactions,
         nextGoals,
         nextSettings,
-        nextBackups
+        nextBackups,
+        nextCustomCategories,
+        nextAllTransactions
       ] = await Promise.all([
         window.ledgerPilot.imports.history(),
         window.ledgerPilot.normalization.history(),
@@ -213,7 +226,9 @@ export const App = () => {
         window.ledgerPilot.transactions.review(),
         window.ledgerPilot.goals.get(),
         window.ledgerPilot.settings.get(),
-        window.ledgerPilot.backup.history()
+        window.ledgerPilot.backup.history(),
+        window.ledgerPilot.categories.list(),
+        window.ledgerPilot.transactions.all()
       ]);
 
       setHistory(nextHistory);
@@ -224,6 +239,8 @@ export const App = () => {
       setGoals(nextGoals);
       setSettings(nextSettings.settings);
       setBackups(nextBackups);
+      setCustomCategories(nextCustomCategories.categories);
+      setAllTransactions(nextAllTransactions.transactions);
       setFatalError(undefined);
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.stack ?? nextError.message : String(nextError);
@@ -391,6 +408,50 @@ export const App = () => {
     }
   };
 
+  const handleAddCategory = async () => {
+    if (!newCategoryName.trim()) {
+      return;
+    }
+    setIsWorking(true);
+    setError(undefined);
+    try {
+      const next = await window.ledgerPilot.categories.add({
+        name: newCategoryName,
+        bucket: newCategoryBucket
+      });
+      setCustomCategories(next.categories);
+      setNewCategoryName('');
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to add category.');
+    } finally {
+      setIsWorking(false);
+    }
+  };
+
+  const handleReassignCategory = async (transaction: ReviewTransaction, category: string) => {
+    setIsWorking(true);
+    setError(undefined);
+    try {
+      await window.ledgerPilot.categorization.override({
+        transactionId: transaction.id,
+        merchantNormalized: transaction.merchantNormalized,
+        category
+      });
+      await loadWorkspaceState();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to reassign category.');
+    } finally {
+      setIsWorking(false);
+    }
+  };
+
+  // Built-in categories plus any user-defined ones (kept before the trailing "unknown" entry).
+  const categoryOptions = [
+    ...ALL_CATEGORIES.filter((c) => c !== 'unknown'),
+    ...customCategories.map((c) => c.name),
+    'unknown'
+  ];
+
   const handleAskAdvisor = async () => {
     if (!advisorQuestion.trim()) {
       return;
@@ -473,6 +534,12 @@ export const App = () => {
     try {
       await window.ledgerPilot.workspace.clear();
       await loadWorkspaceState();
+      // Reset client-only derived views that loadWorkspaceState does not refetch, so nothing
+      // stale (savings plan, advisor answer, suggestions, export) lingers after a wipe.
+      setSavingsPlan(emptySavingsPlan);
+      setAdvisorResponse(undefined);
+      setCategorySuggestions({ suggestions: [] });
+      setExportRecord(undefined);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Clear failed.');
     } finally {
@@ -493,7 +560,6 @@ export const App = () => {
   };
 
   const monthlyNetValues = dashboardData.monthlyTrend.map((point) => point.netCashFlow);
-  const yearlyNetValues = dashboardData.yearlyTrend.map((point) => point.netCashFlow);
   const highestCategoryTotal = maxCategoryTotal(dashboardData.topExpenseCategories) || 1;
 
   if (fatalError) {
@@ -571,20 +637,13 @@ export const App = () => {
                 </div>
                 <Meter className="mt-2" value={dashboardData.kpis.financialHealthScore} />
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Card className="bg-slate-950/80 p-4">
-                  <p className="text-sm text-slate-400">Interest paid</p>
-                  <p className="mt-2 text-2xl font-semibold text-rose-300">
-                    {formatCurrency(dashboardData.kpis.interestPaid)}
-                  </p>
-                </Card>
-                <Card className="bg-slate-950/80 p-4">
-                  <p className="text-sm text-slate-400">Debt payments</p>
-                  <p className="mt-2 text-2xl font-semibold">
-                    {formatCurrency(dashboardData.kpis.debtPayments)}
-                  </p>
-                </Card>
-              </div>
+              <Card className="bg-slate-950/80 p-4">
+                <p className="text-sm text-slate-400">Debt payments</p>
+                <p className="mt-2 text-2xl font-semibold text-amber-300">
+                  {formatCurrency(dashboardData.kpis.debtBreakdown.total)}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">mortgage + car + rent + LOC + CC</p>
+              </Card>
               <Card className="bg-slate-950/80 p-4">
                 <p className="text-sm text-slate-400">Review queue</p>
                 <p className="mt-2 text-2xl font-semibold">{dashboardData.kpis.reviewCount}</p>
@@ -596,32 +655,49 @@ export const App = () => {
           </Card>
         </section>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {[
-            { label: 'Income', value: formatCurrency(dashboardData.kpis.income), tone: 'text-emerald-300' },
-            { label: 'Expenses', value: formatCurrency(dashboardData.kpis.expenses), tone: 'text-rose-300' },
-            { label: 'Internal transfers', value: dashboardData.kpis.internalTransfers.toString(), tone: 'text-slate-100' },
-            { label: 'Monthly comparison', value: `${dashboardData.monthlyComparison.changePercentage.toFixed(1)}%`, tone: dashboardData.monthlyComparison.changeAmount >= 0 ? 'text-emerald-300' : 'text-rose-300' },
-            { label: 'Yearly comparison', value: `${dashboardData.yearlyComparison.changePercentage.toFixed(1)}%`, tone: dashboardData.yearlyComparison.changeAmount >= 0 ? 'text-emerald-300' : 'text-rose-300' }
+            { label: 'Income', value: formatCurrency(dashboardData.kpis.income), tone: 'text-emerald-300', sub: '' },
+            { label: 'Discretionary expenses', value: formatCurrency(dashboardData.kpis.expenses), tone: 'text-rose-300', sub: 'food, shopping, bills, etc.' },
+            { label: 'Debt payments', value: formatCurrency(dashboardData.kpis.debtBreakdown.total), tone: 'text-amber-300', sub: 'mortgage, car, LOC, CC' },
+            { label: 'Interest paid', value: formatCurrency(dashboardData.kpis.interestPaid), tone: 'text-orange-300', sub: '' }
           ].map((item) => (
             <Card key={item.label} className="bg-slate-900/60 p-5">
               <p className="text-sm text-slate-400">{item.label}</p>
               <p className={`mt-3 text-2xl font-semibold ${item.tone}`}>{item.value}</p>
+              {item.sub ? <p className="mt-1 text-xs text-slate-500">{item.sub}</p> : null}
             </Card>
           ))}
         </section>
 
+        <section>
+          <Card className="bg-slate-900/60 p-6">
+            <p className="text-sm uppercase tracking-[0.3em] text-amber-300">Debt payments</p>
+            <p className="mt-1 text-xs text-slate-500">Excluded from expenses — mortgage, car, rent, LOC, credit card shown separately</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              {[
+                { label: 'Mortgage', value: dashboardData.kpis.debtBreakdown.mortgage },
+                { label: 'Car payments', value: dashboardData.kpis.debtBreakdown.carPayments },
+                { label: 'Rent', value: dashboardData.kpis.debtBreakdown.rent },
+                { label: 'Credit card', value: dashboardData.kpis.debtBreakdown.creditCard },
+                { label: 'Line of credit', value: dashboardData.kpis.debtBreakdown.lineOfCredit }
+              ].map((d) => (
+                <Card key={d.label} className="bg-slate-950/80 p-4">
+                  <p className="text-xs text-slate-500">{d.label}</p>
+                  <p className={`mt-2 text-xl font-semibold ${d.value > 0 ? 'text-amber-200' : 'text-slate-600'}`}>
+                    {formatCurrency(d.value)}
+                  </p>
+                </Card>
+              ))}
+            </div>
+          </Card>
+        </section>
+
         <section className="grid gap-8 lg:grid-cols-[1.15fr_0.85fr]">
           <Card className="bg-slate-900/60 p-8">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-sm uppercase tracking-[0.3em] text-violet-300">Cash flow trend</p>
-                <h2 className="mt-3 text-2xl font-semibold">Monthly and yearly reporting</h2>
-              </div>
-              <div className="text-right text-sm text-slate-400">
-                <p>Current: {formatCurrency(dashboardData.monthlyComparison.currentPeriod)}</p>
-                <p>Previous: {formatCurrency(dashboardData.monthlyComparison.previousPeriod)}</p>
-              </div>
+            <div>
+              <p className="text-sm uppercase tracking-[0.3em] text-violet-300">Monthly trend</p>
+              <h2 className="mt-3 text-2xl font-semibold">Income and expenses over time</h2>
             </div>
             <div className="mt-6 rounded-3xl bg-slate-950/80 p-5">
               <Sparkline strokeClassName="text-sky-300" values={monthlyNetValues} />
@@ -640,8 +716,33 @@ export const App = () => {
 
             <div className="mt-6 grid gap-4 xl:grid-cols-2">
               <Card className="bg-slate-950/80 p-5">
-                <p className="text-sm text-slate-400">Yearly comparison</p>
-                <Sparkline strokeClassName="text-emerald-300" values={yearlyNetValues} />
+                <p className="text-sm text-slate-400">Month-over-month by category</p>
+                {dashboardData.categoryComparisons.length === 0 ? (
+                  <p className="mt-4 text-sm text-slate-500">No data yet — import transactions first.</p>
+                ) : (
+                  <table className="mt-3 w-full text-xs">
+                    <thead>
+                      <tr className="text-slate-500 uppercase tracking-wide">
+                        <th className="pb-2 text-left font-normal">Category</th>
+                        <th className="pb-2 text-right font-normal">This month</th>
+                        <th className="pb-2 text-right font-normal">Last month</th>
+                        <th className="pb-2 text-right font-normal">Change</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                      {dashboardData.categoryComparisons.map((c) => (
+                        <tr key={c.category}>
+                          <td className="py-1.5 text-slate-300">{c.category.replaceAll('_', ' ')}</td>
+                          <td className="py-1.5 text-right text-slate-100">{formatCurrency(c.currentMonth)}</td>
+                          <td className="py-1.5 text-right text-slate-500">{formatCurrency(c.previousMonth)}</td>
+                          <td className={`py-1.5 text-right ${c.changeAmount > 0 ? 'text-rose-300' : c.changeAmount < 0 ? 'text-emerald-300' : 'text-slate-500'}`}>
+                            {c.changeAmount > 0 ? '+' : ''}{formatCurrency(c.changeAmount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </Card>
               <Card className="bg-slate-950/80 p-5">
                 <p className="text-sm text-slate-400">Largest spending categories</p>
@@ -660,6 +761,35 @@ export const App = () => {
                     ))
                   )}
                 </ul>
+              </Card>
+              <Card className="bg-slate-950/80 p-5 sm:col-span-2">
+                <p className="text-sm text-slate-400">Expenses by group</p>
+                <div className="mt-4 space-y-4">
+                  {dashboardData.expenseGroups.length === 0 ? (
+                    <p className="text-sm text-slate-500">No expense data yet.</p>
+                  ) : (
+                    dashboardData.expenseGroups.map((group) => {
+                      const topGroupTotal = dashboardData.expenseGroups[0]?.total || 1;
+                      return (
+                        <div key={group.group}>
+                          <div className="flex items-center justify-between text-sm font-medium text-slate-100">
+                            <span>{group.group}</span>
+                            <span>{formatCurrency(group.total)}</span>
+                          </div>
+                          <Meter className="mt-2" value={(group.total / topGroupTotal) * 100} />
+                          <ul className="mt-2 space-y-1 pl-3">
+                            {group.categories.map((category) => (
+                              <li key={category.category} className="flex items-center justify-between text-xs text-slate-400">
+                                <span>{category.category.replaceAll('_', ' ')}</span>
+                                <span>{formatCurrency(category.total)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </Card>
             </div>
           </Card>
@@ -869,7 +999,44 @@ export const App = () => {
                 ) : null}
               </div>
             </div>
-            <div className="mt-6 space-y-3">
+            <div className="mt-5 rounded-2xl bg-slate-950/60 p-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Add custom category</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <input
+                  className="min-w-0 flex-1 rounded-xl bg-slate-800 px-3 py-1.5 text-xs text-slate-100 outline-none placeholder:text-slate-500"
+                  placeholder="e.g. daycare, pet care, side hustle"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void handleAddCategory(); }}
+                />
+                <select
+                  className="rounded-xl bg-slate-800 px-2 py-1.5 text-xs text-slate-100 outline-none"
+                  value={newCategoryBucket}
+                  onChange={(e) => setNewCategoryBucket(e.target.value as 'income' | 'expense' | 'transfer')}
+                >
+                  <option value="expense">Expense</option>
+                  <option value="income">Income</option>
+                  <option value="transfer">Transfer (ignore)</option>
+                </select>
+                <Button
+                  className="bg-violet-700 px-3 py-1.5 text-xs text-white hover:bg-violet-600"
+                  disabled={isWorking || !newCategoryName.trim()}
+                  onClick={() => void handleAddCategory()}
+                >
+                  Add
+                </Button>
+              </div>
+              {customCategories.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {customCategories.map((c) => (
+                    <span key={c.name} className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300">
+                      {c.name.replaceAll('_', ' ')} · {c.bucket}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <div className="mt-4 space-y-3">
               {reviewTransactions.length === 0 ? (
                 <p className="text-sm text-slate-400">No low-confidence transactions pending review.</p>
               ) : (
@@ -904,11 +1071,7 @@ export const App = () => {
                               });
                             }}
                           >
-                            {(['salary','income','refunds','credit_card_payments','mortgage_payments',
-                              'line_of_credit_payments','bank_transfers','internal_transfers',
-                              'interac_e_transfers','bill_payments','utilities','groceries',
-                              'restaurants','fuel','shopping','travel','insurance','investments',
-                              'interest_charges','interest_income','fees','taxes','unknown'] as const).map((cat) => (
+                            {categoryOptions.map((cat) => (
                               <option key={cat} value={cat}>{cat.replaceAll('_', ' ')}</option>
                             ))}
                           </select>
@@ -967,6 +1130,73 @@ export const App = () => {
                 ))
               )}
             </div>
+          </Card>
+        </section>
+
+        <section>
+          <Card className="bg-slate-900/60 p-8">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm uppercase tracking-[0.3em] text-sky-300">All transactions</p>
+                <h2 className="mt-3 text-2xl font-semibold">
+                  Every transaction ({allTransactions.length}) — reassign any category
+                </h2>
+              </div>
+              <input
+                className="w-64 rounded-xl bg-slate-800 px-3 py-1.5 text-sm text-slate-100 outline-none placeholder:text-slate-500"
+                placeholder="Filter by description / category"
+                value={txnFilter}
+                onChange={(e) => setTxnFilter(e.target.value)}
+              />
+            </div>
+            <div className="mt-5 max-h-[28rem] overflow-y-auto rounded-2xl border border-slate-800">
+              <table className="w-full text-left text-sm">
+                <thead className="sticky top-0 bg-slate-950 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2">Date</th>
+                    <th className="px-3 py-2">Description</th>
+                    <th className="px-3 py-2">Account</th>
+                    <th className="px-3 py-2 text-right">Amount</th>
+                    <th className="px-3 py-2">Category</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allTransactions
+                    .filter((t) => {
+                      const q = txnFilter.trim().toLowerCase();
+                      if (!q) return true;
+                      return t.descriptionRaw.toLowerCase().includes(q) || t.currentCategory.toLowerCase().includes(q);
+                    })
+                    .map((transaction) => (
+                      <tr key={transaction.id} className="border-t border-slate-800/60">
+                        <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-400">
+                          {transaction.postedAt.slice(0, 10)}
+                        </td>
+                        <td className="max-w-[22rem] truncate px-3 py-2 text-slate-100">{transaction.descriptionRaw}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-500">{transaction.accountName}</td>
+                        <td className={`whitespace-nowrap px-3 py-2 text-right ${transaction.amount < 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
+                          {formatCurrency(transaction.amount)}
+                        </td>
+                        <td className="px-3 py-2">
+                          <select
+                            className="rounded-lg bg-slate-800 px-2 py-1 text-xs text-slate-100 outline-none"
+                            value={transaction.currentCategory}
+                            disabled={isWorking}
+                            onChange={(e) => void handleReassignCategory(transaction, e.target.value)}
+                          >
+                            {categoryOptions.map((cat) => (
+                              <option key={cat} value={cat}>{cat.replaceAll('_', ' ')}</option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              Changing a category applies to every transaction from the same merchant (teach once, apply to all).
+            </p>
           </Card>
         </section>
 
@@ -1092,40 +1322,120 @@ export const App = () => {
             </div>
 
             {savingsPlan.recommendations.length > 0 ? (
-              <div className="mt-6 rounded-3xl bg-slate-950/80 p-5">
-                <p className="text-sm uppercase tracking-[0.2em] text-emerald-300">Savings optimizer</p>
-                <p className="mt-2 text-2xl font-semibold text-emerald-300">
-                  {formatCurrency(savingsPlan.totalMonthlySavings)} / month
-                </p>
-                <ul className="mt-4 space-y-3">
-                  {savingsPlan.recommendations.map((recommendation) => (
-                    <li key={recommendation.title} className="rounded-2xl bg-slate-900/70 p-4 text-sm">
-                      <div className="flex items-center justify-between gap-4">
-                        <span className="font-medium text-slate-100">{recommendation.title}</span>
-                        <span className="text-emerald-300">{formatCurrency(recommendation.monthlySavings)}</span>
-                      </div>
-                      <p className="mt-2 text-slate-300">{recommendation.rationale}</p>
-                      <p className="mt-2 text-xs text-slate-500">
-                        Goal impact: about {recommendation.goalImpactDays} days faster
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-                {savingsPlan.goalForecasts.length > 0 ? (
-                  <ul className="mt-4 space-y-2 text-sm text-slate-300">
-                    {savingsPlan.goalForecasts.map((forecast) => (
-                      <li key={forecast.goalId} className="flex items-center justify-between rounded-2xl bg-slate-900/70 px-4 py-3">
-                        <span>{forecast.goalId}</span>
-                        <span>{forecast.successProbability.toFixed(0)}% success</span>
-                        <span>{forecast.projectedCompletionDate}</span>
+              <div className="mt-6 space-y-4">
+                <div className="rounded-3xl bg-slate-950/80 p-5">
+                  <div className="flex items-baseline justify-between gap-4">
+                    <p className="text-sm uppercase tracking-[0.2em] text-emerald-300">Where to cut</p>
+                    <p className="text-xl font-semibold text-emerald-300">
+                      {formatCurrency(savingsPlan.totalMonthlySavings)}<span className="text-sm font-normal text-slate-400"> / month freed</span>
+                    </p>
+                  </div>
+                  <ul className="mt-4 space-y-3">
+                    {savingsPlan.recommendations.map((recommendation) => (
+                      <li key={recommendation.title} className="rounded-2xl bg-slate-900/70 p-4 text-sm">
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="font-medium text-slate-100">{recommendation.title}</span>
+                          <span className="shrink-0 text-emerald-300">{formatCurrency(recommendation.monthlySavings)}/mo</span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-400">{recommendation.rationale}</p>
                       </li>
                     ))}
                   </ul>
+                </div>
+
+                {savingsPlan.goalForecasts.length > 0 ? (
+                  <div className="rounded-3xl bg-slate-950/80 p-5">
+                    <p className="text-sm uppercase tracking-[0.2em] text-violet-300">Goal feasibility</p>
+                    <ul className="mt-4 space-y-4">
+                      {savingsPlan.goalForecasts.map((forecast) => {
+                        const verdictStyle = {
+                          on_track: { badge: 'bg-emerald-500/20 text-emerald-300', label: 'On track' },
+                          achievable_with_cuts: { badge: 'bg-amber-500/20 text-amber-300', label: 'Achievable with cuts' },
+                          shortfall: { badge: 'bg-orange-500/20 text-orange-300', label: 'Shortfall' },
+                          needs_income_boost: { badge: 'bg-red-500/20 text-red-300', label: 'Needs income boost' },
+                        }[forecast.verdict] ?? { badge: 'bg-slate-500/20 text-slate-300', label: forecast.verdict };
+                        const pct = Math.min(100, Math.round((forecast.maxReachableByDeadline / (forecast.requiredMonthlySavings * (new Date(forecast.projectedCompletionDate).getTime() - Date.now()) / 2592000000 + forecast.maxReachableByDeadline)) * 100));
+                        const reachPct = Math.min(100, Math.round(
+                          goals.goals.find(g => g.id === forecast.goalId)
+                            ? (forecast.maxReachableByDeadline / (goals.goals.find(g => g.id === forecast.goalId)?.targetAmount ?? 1)) * 100
+                            : 100
+                        ));
+                        return (
+                          <li key={forecast.goalId} className="rounded-2xl bg-slate-900/70 p-4 text-sm">
+                            <div className="flex items-start justify-between gap-3">
+                              <span className="font-medium text-slate-100">{forecast.goalName}</span>
+                              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${verdictStyle.badge}`}>
+                                {verdictStyle.label}
+                              </span>
+                            </div>
+                            <p className="mt-2 leading-6 text-slate-300">{forecast.message}</p>
+                            <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-400">
+                              <div>
+                                <p className="text-slate-500">Required / mo</p>
+                                <p className="mt-0.5 font-medium text-slate-200">{formatCurrency(forecast.requiredMonthlySavings)}</p>
+                              </div>
+                              <div>
+                                <p className="text-slate-500">Max reachable</p>
+                                <p className="mt-0.5 font-medium text-slate-200">{formatCurrency(forecast.maxReachableByDeadline)}</p>
+                              </div>
+                              <div>
+                                <p className="text-slate-500">Completion</p>
+                                <p className="mt-0.5 font-medium text-slate-200">{forecast.projectedCompletionDate}</p>
+                              </div>
+                            </div>
+                            <div className="mt-3">
+                              <div className="mb-1 flex justify-between text-xs text-slate-500">
+                                <span>Projected progress by deadline</span>
+                                <span>{reachPct}%</span>
+                              </div>
+                              <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+                                <div
+                                  className={`h-full rounded-full transition-all ${reachPct >= 100 ? 'bg-emerald-400' : reachPct >= 60 ? 'bg-amber-400' : 'bg-red-400'}`}
+                                  style={{ width: `${reachPct}%` }}
+                                />
+                              </div>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
                 ) : null}
               </div>
             ) : null}
           </Card>
         </section>
+
+        {savingsPlan.financialSummary.length > 0 ? (
+          <section>
+            <Card className="bg-slate-900/60 p-8">
+              <p className="text-sm uppercase tracking-[0.3em] text-sky-300">Financial health summary</p>
+              <h2 className="mt-3 text-2xl font-semibold">Where you stand — honest assessment</h2>
+              <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                {savingsPlan.financialSummary.map((insight) => {
+                  const sev = {
+                    good: { bar: 'bg-emerald-400', badge: 'bg-emerald-500/15 text-emerald-300', dot: '●' },
+                    warning: { bar: 'bg-amber-400', badge: 'bg-amber-500/15 text-amber-300', dot: '◆' },
+                    alert: { bar: 'bg-red-400', badge: 'bg-red-500/15 text-red-300', dot: '▲' },
+                  }[insight.severity] ?? { bar: 'bg-slate-400', badge: 'bg-slate-500/15 text-slate-300', dot: '●' };
+                  return (
+                    <div key={insight.title} className="rounded-2xl bg-slate-950/80 p-4">
+                      <div className={`mb-3 h-0.5 w-10 rounded-full ${sev.bar}`} />
+                      <div className="flex items-start gap-2">
+                        <span className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${sev.badge}`}>{sev.dot}</span>
+                        <div>
+                          <p className="font-medium text-slate-100">{insight.title}</p>
+                          <p className="mt-1 text-xs font-mono text-slate-400">{insight.metric}</p>
+                        </div>
+                      </div>
+                      <p className="mt-3 text-sm leading-6 text-slate-300">{insight.recommendation}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          </section>
+        ) : null}
 
         <section className="grid gap-8 lg:grid-cols-[1fr_1fr]">
           <Card className="bg-slate-900/60 p-8">

@@ -26,6 +26,11 @@ export default defineConfig({
     }
   },
   base: './',
+  // Bind IPv4 so the electron dev launcher's `wait-on tcp:127.0.0.1:5173` resolves
+  // (Vite otherwise binds IPv6 [::1] only and the launcher hangs forever).
+  server: {
+    host: '127.0.0.1'
+  },
   build: {
     outDir: 'dist'
   }

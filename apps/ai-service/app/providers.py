@@ -65,9 +65,19 @@ def _savings_prompt(request: AdvisorRequest) -> str:
 
 def _categorize_prompt(transactions_text: str) -> str:
     return (
-        f"Categorize these transactions. For each, pick the best category from: "
-        f"salary, groceries, restaurants, shopping, travel, utilities, insurance, "
-        f"fuel, interest_charges, bank_transfers, bill_payments, fees, unknown.\n\n"
+        f"You are a Canadian personal finance categorization engine.\n"
+        f"Categorize each transaction. Use the account_name as strong context:\n"
+        f"  - Credits (positive amounts) in a credit card account -> credit_card_payments\n"
+        f"  - Credits (positive amounts) in a line of credit account -> line_of_credit_payments\n"
+        f"  - Debits from chequing labeled as LOC/credit-card payment -> same payment category\n\n"
+        f"Categories (pick exactly one):\n"
+        f"  Income: salary, income, interest_income, refunds\n"
+        f"  Expenses: groceries, restaurants, fuel, shopping, travel, utilities, insurance,\n"
+        f"            bill_payments, fees, interest_charges, taxes, lifestyle, india_expenses\n"
+        f"  Payments/Debt: credit_card_payments, line_of_credit_payments, mortgage_payments,\n"
+        f"                  car_payments, rent\n"
+        f"  Transfers: bank_transfers, internal_transfers, interac_e_transfers, investments\n"
+        f"  Fallback: unknown\n\n"
         f"{transactions_text}\n\n"
         f"Reply with JSON array: "
         f"[{{transaction_id, category, confidence_score (0-1), rationale}}]"
@@ -176,7 +186,7 @@ def dispatch_categorization(request: CategorizationRequest) -> CategorizationRes
     from app.main import CategorizationResponse, CategorizationSuggestion
     try:
         txn_lines = '\n'.join(
-            f"- id={t.id} desc={t.description_raw!r} amount={t.amount}"
+            f"- id={t.id} account={t.account_name!r} desc={t.description_raw!r} amount={t.amount}"
             for t in request.transactions[:50]
         )
         raw = _call_llm(request, _categorize_prompt(txn_lines))

@@ -4,6 +4,7 @@ import type {
   BackupRecord,
   CategoryOverrideRequest,
   CategoryRulesPayload,
+  CustomCategoriesPayload,
   CategorySuggestionPayload,
   DashboardData,
   ExportPayload,
@@ -43,6 +44,7 @@ declare global {
           topCategories: Array<{ category: string; total: number }>;
         }>;
         review: () => Promise<{ transactions: ReviewTransaction[] }>;
+        all: () => Promise<{ transactions: ReviewTransaction[] }>;
       };
       dashboard: {
         data: () => Promise<DashboardData>;
@@ -60,6 +62,10 @@ declare global {
         suggest: () => Promise<CategorySuggestionPayload>;
         override: (payload: CategoryOverrideRequest) => Promise<CategoryRulesPayload>;
         rules: () => Promise<CategoryRulesPayload>;
+      };
+      categories: {
+        list: () => Promise<CustomCategoriesPayload>;
+        add: (category: { name: string; bucket: 'income' | 'expense' | 'transfer' }) => Promise<CustomCategoriesPayload>;
       };
       advisor: {
         ask: (question: string) => Promise<AdvisorResponse>;

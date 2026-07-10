@@ -58,8 +58,11 @@ export const ensureAiService = async (
     } else {
       const repoRoot = path.resolve(desktopAppPath, '..', '..');
       const servicePath = path.join(repoRoot, 'apps', 'ai-service');
+      // Prefer venv python so dependencies are always available without system-wide install
+      const venvPython = path.join(servicePath, '.venv', 'bin', 'python3');
+      const python = require('node:fs').existsSync(venvPython) ? venvPython : 'python3';
       aiProcess = spawn(
-        'python3',
+        python,
         ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(aiServicePort)],
         {
           cwd: servicePath,
@@ -175,7 +178,11 @@ export const requestSavingsPlan = async (payload: {
   const raw = await postJson<{
     recommendations: Array<{ category: string; title: string; rationale: string; monthly_savings: number; goal_impact_days: number }>;
     total_monthly_savings: number;
-    goal_forecasts: Array<{ goal_id: string; required_monthly_savings: number; projected_completion_date: string; success_probability: number }>;
+    goal_forecasts: Array<{
+      goal_id: string; goal_name: string; required_monthly_savings: number; projected_completion_date: string;
+      success_probability: number; verdict: string; shortfall_per_month: number; max_reachable_by_deadline: number; message: string;
+    }>;
+    financial_summary: Array<{ title: string; metric: string; recommendation: string; severity: string }>;
   }>('/advisor/savings-plan', {
     ...providerFields(payload.settings, payload.apiKey),
     question: 'Savings optimizer request',
@@ -197,8 +204,18 @@ export const requestSavingsPlan = async (payload: {
         category: entry.category,
         total: entry.total
       })),
-      monthly_trend: [],
-      yearly_trend: [],
+      monthly_trend: payload.dashboard.monthlyTrend.map((entry) => ({
+        label: entry.label,
+        income: entry.income,
+        expenses: entry.expenses,
+        net_cash_flow: entry.netCashFlow
+      })),
+      yearly_trend: payload.dashboard.yearlyTrend.map((entry) => ({
+        label: entry.label,
+        income: entry.income,
+        expenses: entry.expenses,
+        net_cash_flow: entry.netCashFlow
+      })),
       spending_calendar: []
     },
     transactions: payload.transactions.map((transaction) => ({
@@ -233,10 +250,21 @@ export const requestSavingsPlan = async (payload: {
     totalMonthlySavings: raw.total_monthly_savings ?? 0,
     goalForecasts: (raw.goal_forecasts ?? []).map((f) => ({
       goalId: f.goal_id,
+      goalName: f.goal_name,
       requiredMonthlySavings: f.required_monthly_savings,
       projectedCompletionDate: f.projected_completion_date,
-      successProbability: f.success_probability
-    }))
+      successProbability: f.success_probability,
+      verdict: f.verdict as 'on_track' | 'achievable_with_cuts' | 'shortfall' | 'needs_income_boost',
+      shortfallPerMonth: f.shortfall_per_month,
+      maxReachableByDeadline: f.max_reachable_by_deadline,
+      message: f.message,
+    })),
+    financialSummary: (raw.financial_summary ?? []).map((s) => ({
+      title: s.title,
+      metric: s.metric,
+      recommendation: s.recommendation,
+      severity: s.severity as 'good' | 'warning' | 'alert',
+    })),
   } satisfies SavingsPlan;
 };
 

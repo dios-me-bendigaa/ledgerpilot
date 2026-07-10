@@ -358,9 +358,131 @@ const normalizeMerchant = (description: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-const classifyTransaction = (descriptionRaw: string, amount: number) => {
+// Merchant-specific overrides that must win over the bank's own Category column. The bank lumps
+// Remitly remittances under "Transfer", but the user tracks them as India expenses.
+const merchantOverrides: Array<{
+  match: string;
+  category: TransactionCategory;
+  kind: TransactionKind;
+}> = [
+  { match: 'remitly', category: 'india_expenses', kind: 'expense' },
+  // TIPP = Winnipeg's Tax Instalment Payment Plan — a property-tax draft, even when the bank
+  // labels it generically "Taxes".
+  { match: 'tipp', category: 'property_tax', kind: 'expense' },
+  // NBC LOC uses "Bank fee" as bank category for interest rows — override so it lands in
+  // interest_charges, not fees.
+  { match: 'interest to be paid', category: 'interest_charges', kind: 'expense' },
+  // NBC LOC payment rows — both in chequing (debit) and LOC (credit) — are labeled "Transfer"
+  // by the bank, but represent LOC principal/interest payments.
+  { match: 'authorized transaction on line of credit', category: 'line_of_credit_payments', kind: 'payment' },
+  { match: 'overdue transfer line of credit', category: 'line_of_credit_payments', kind: 'payment' },
+  // Scotia LOC payment format: "payment from - *****xx*xx xx" (masked account number)
+  { match: 'payment from - ', category: 'line_of_credit_payments', kind: 'payment' }
+];
+
+// Maps a bank statement's own Category column value -> app category + kind. This is a far stronger
+// signal than description keyword-guessing, so it is consulted before the keyword rules. Ambiguous
+// bank labels (e.g. "Cash", "Finances") are intentionally left unmapped so they fall to review.
+const bankCategoryMap: Record<string, { category: TransactionCategory; kind: TransactionKind }> = {
+  'salary': { category: 'salary', kind: 'income' },
+  'revenue': { category: 'income', kind: 'income' },
+  'income': { category: 'income', kind: 'income' },
+  'interest income': { category: 'interest_income', kind: 'income' },
+  'refund': { category: 'refunds', kind: 'refund' },
+  'transfer': { category: 'internal_transfers', kind: 'internal_transfer' },
+  'credit card payment': { category: 'credit_card_payments', kind: 'payment' },
+  'investments': { category: 'investments', kind: 'transfer' },
+  'line of credit': { category: 'line_of_credit_payments', kind: 'payment' },
+  'loan': { category: 'line_of_credit_payments', kind: 'payment' },
+  'car payment': { category: 'car_payments', kind: 'expense' },
+  'rent': { category: 'rent', kind: 'expense' },
+  'mortgage': { category: 'mortgage_payments', kind: 'payment' },
+  'bills utilities': { category: 'bill_payments', kind: 'expense' },
+  'bills and utilities': { category: 'bill_payments', kind: 'expense' },
+  'utilities': { category: 'home_utilities', kind: 'expense' },
+  'hydro': { category: 'home_utilities', kind: 'expense' },
+  'water': { category: 'home_utilities', kind: 'expense' },
+  'electricity': { category: 'home_utilities', kind: 'expense' },
+  'mobile phone': { category: 'mobile', kind: 'expense' },
+  'mobile': { category: 'mobile', kind: 'expense' },
+  'phone': { category: 'mobile', kind: 'expense' },
+  'internet': { category: 'internet', kind: 'expense' },
+  'car insurance': { category: 'car_insurance', kind: 'expense' },
+  'home insurance': { category: 'home_insurance', kind: 'expense' },
+  'life insurance': { category: 'insurance', kind: 'expense' },
+  'insurance': { category: 'insurance', kind: 'expense' },
+  'groceries': { category: 'groceries', kind: 'expense' },
+  'grocery': { category: 'groceries', kind: 'expense' },
+  'fuel': { category: 'fuel', kind: 'expense' },
+  'gas fuel': { category: 'fuel', kind: 'expense' },
+  'gas and fuel': { category: 'fuel', kind: 'expense' },
+  'restaurants': { category: 'restaurants', kind: 'expense' },
+  'fast food': { category: 'restaurants', kind: 'expense' },
+  'food dining': { category: 'restaurants', kind: 'expense' },
+  'food and dining': { category: 'restaurants', kind: 'expense' },
+  'gym': { category: 'lifestyle', kind: 'expense' },
+  'personal care': { category: 'lifestyle', kind: 'expense' },
+  'pharmacy': { category: 'lifestyle', kind: 'expense' },
+  'health': { category: 'lifestyle', kind: 'expense' },
+  'entertainment': { category: 'lifestyle', kind: 'expense' },
+  'shopping': { category: 'shopping', kind: 'expense' },
+  'clothing': { category: 'shopping', kind: 'expense' },
+  'home furnishing': { category: 'shopping', kind: 'expense' },
+  'electronics and software': { category: 'shopping', kind: 'expense' },
+  'shipping': { category: 'shopping', kind: 'expense' },
+  'travel': { category: 'travel', kind: 'expense' },
+  'air travel': { category: 'travel', kind: 'expense' },
+  'car rentals taxis': { category: 'travel', kind: 'expense' },
+  'car rentals and taxis': { category: 'travel', kind: 'expense' },
+  'vacation': { category: 'vacation', kind: 'expense' },
+  'taxes': { category: 'taxes', kind: 'expense' },
+  'fees': { category: 'fees', kind: 'expense' },
+  'bank fee': { category: 'fees', kind: 'expense' },
+  'finances': { category: 'fees', kind: 'expense' },
+  'legal': { category: 'fees', kind: 'expense' },
+  'cash': { category: 'bank_transfers', kind: 'transfer' },
+  'interest': { category: 'interest_charges', kind: 'expense' }
+};
+
+const classifyTransaction = (descriptionRaw: string, amount: number, bankCategory?: string, accountName?: string) => {
   const normalizedDescription = normalizeMerchant(descriptionRaw);
 
+  // 1. Merchant-specific overrides win over everything (e.g. Remitly -> india_expenses).
+  const override = merchantOverrides.find((rule) => normalizedDescription.includes(rule.match));
+  if (override) {
+    return { category: override.category, transactionKind: override.kind, confidenceScore: 0.95 };
+  }
+
+  // 2. Trust the bank's own Category column when present and recognized.
+  const mappedBankCategory = bankCategory ? bankCategoryMap[normalizeMerchant(bankCategory)] : undefined;
+  if (mappedBankCategory) {
+    return {
+      category: mappedBankCategory.category,
+      transactionKind: mappedBankCategory.kind,
+      confidenceScore: 0.9
+    };
+  }
+
+  // 2.5. Account-type context: credits (amount > 0) arriving in a known debt/credit-product
+  // account are payment receipts that reduce the outstanding balance. This fires when the bank
+  // description is generic (e.g. "Payment received") and no keyword rule would match.
+  if (accountName && amount > 0) {
+    const normalizedAccount = normalizeMerchant(accountName);
+    if (/credit card|mastercard|visa|\bcc\b/.test(normalizedAccount)) {
+      return { category: 'credit_card_payments' as const, transactionKind: 'payment' as const, confidenceScore: 0.87 };
+    }
+    if (/line of credit|\bloc\b|marge de credit|marge credit|ligne de credit/.test(normalizedAccount)) {
+      return { category: 'line_of_credit_payments' as const, transactionKind: 'payment' as const, confidenceScore: 0.87 };
+    }
+    if (/mortgage|hypotheque/.test(normalizedAccount)) {
+      return { category: 'mortgage_payments' as const, transactionKind: 'payment' as const, confidenceScore: 0.85 };
+    }
+    if (/car loan|auto loan|vehicle loan/.test(normalizedAccount)) {
+      return { category: 'car_payments' as const, transactionKind: 'payment' as const, confidenceScore: 0.85 };
+    }
+  }
+
+  // 3. Fall back to description keyword rules.
   if (
     normalizedDescription.includes('transfer to') ||
     normalizedDescription.includes('transfer from') ||
@@ -383,7 +505,7 @@ const classifyTransaction = (descriptionRaw: string, amount: number) => {
     }
   }
 
-  // Unknown transactions go to review queue regardless of sign
+  // 4. Unknown transactions go to review queue regardless of sign.
   return {
     category: 'unknown' as const,
     transactionKind: amount > 0 ? ('income' as const) : ('expense' as const),
@@ -442,8 +564,11 @@ const parseRecordRows = async (
     'trans description',
     'trn description'
   ]);
-  const description2Index = findColumn(headers, ['description 2', 'description2', 'memo']);
+  const description2Index = findColumn(headers, [
+    'description 2', 'description2', 'memo', 'sub description', 'subdescription', 'details', 'particulars'
+  ]);
   const accountIndex = findColumn(headers, ['account', 'account name', 'account number']);
+  const categoryIndex = findColumn(headers, ['category', 'type', 'transaction type', 'categorie']);
 
   logger?.(
     `parseRecordRows file="${record.fileName}" columns: ` +
@@ -466,11 +591,12 @@ const parseRecordRows = async (
           : parseAmount(row[creditIndex] ?? '') - parseAmount(row[debitIndex] ?? '');
       const parsedDate = parseDateValue(dateValue, timeValue);
       const merchantNormalized = normalizeMerchant(descriptionRaw);
-      const classification = classifyTransaction(descriptionRaw, amount);
+      const bankCategory = categoryIndex >= 0 ? row[categoryIndex] ?? '' : '';
       const accountName =
         accountIndex >= 0 && row[accountIndex]
           ? row[accountIndex]
           : path.basename(record.fileName, path.extname(record.fileName));
+      const classification = classifyTransaction(descriptionRaw, amount, bankCategory, accountName);
 
       return {
         importRecordId: record.id,
@@ -498,16 +624,21 @@ const parseRecordRows = async (
   return mapped;
 };
 
-const makeFingerprint = (row: ParsedTransactionRow) =>
+// `occurrence` disambiguates genuinely repeated rows (two identical same-day transactions post
+// separately at the bank). Without it, the second identical row is wrongly dropped as a duplicate.
+// The index is assigned in file order, so re-importing the same file yields the same fingerprints
+// and true cross-import duplicates are still caught.
+const makeFingerprint = (row: ParsedTransactionRow, occurrence: number) =>
   crypto
     .createHash('sha256')
-    .update(`${row.accountName}|${row.postedDate}|${row.amount.toFixed(2)}|${row.merchantNormalized}`)
+    .update(`${row.accountName}|${row.postedDate}|${row.amount.toFixed(2)}|${row.merchantNormalized}|${occurrence}`)
     .digest('hex');
 
 const isTransferLike = (transaction: NormalizedTransaction) =>
-  ['bank_transfers', 'credit_card_payments', 'line_of_credit_payments', 'interac_e_transfers', 'investments'].includes(
-    transaction.category,
-  );
+  [
+    'bank_transfers', 'internal_transfers',
+    'credit_card_payments', 'line_of_credit_payments', 'interac_e_transfers', 'investments'
+  ].includes(transaction.category);
 
 const dateNeighbours = (date: string): string[] => {
   const d = new Date(date);
@@ -556,9 +687,10 @@ const markInternalTransfers = (transactions: NormalizedTransaction[]) => {
 
     debitEntry.transaction.isInternalTransfer = true;
     credit.transaction.isInternalTransfer = true;
-    debitEntry.transaction.category = 'internal_transfers';
+    // Preserve the debit side's category so payment categories (line_of_credit_payments,
+    // credit_card_payments, etc.) survive pairing and remain visible in the debt section.
+    // Only suppress the credit side — it's the mirror entry in the receiving account.
     credit.transaction.category = 'internal_transfers';
-    debitEntry.transaction.transactionKind = 'internal_transfer';
     credit.transaction.transactionKind = 'internal_transfer';
     debitEntry.transaction.transferPairKey = key;
     credit.transaction.transferPairKey = key;
@@ -611,8 +743,13 @@ export class NormalizationEngine {
     parsedRows.sort((left, right) => left.postedAt.localeCompare(right.postedAt));
 
     const seenFingerprints = new Set<string>();
+    const occurrenceCounts = new Map<string, number>();
     const transactions = parsedRows.map<NormalizedTransaction>((row) => {
-      const fingerprint = makeFingerprint(row);
+      // Count identical rows (same account/date/amount/merchant) in file order so repeats stay distinct.
+      const baseKey = `${row.accountName}|${row.postedDate}|${row.amount.toFixed(2)}|${row.merchantNormalized}`;
+      const occurrence = occurrenceCounts.get(baseKey) ?? 0;
+      occurrenceCounts.set(baseKey, occurrence + 1);
+      const fingerprint = makeFingerprint(row, occurrence);
       const isDuplicate = seenFingerprints.has(fingerprint) || options.knownFingerprints.has(fingerprint);
       seenFingerprints.add(fingerprint);
       const transactionId = crypto.randomUUID();

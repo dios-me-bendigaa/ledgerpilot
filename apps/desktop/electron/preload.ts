@@ -7,6 +7,7 @@ import type {
   BackupRecord,
   CategoryOverrideRequest,
   CategoryRulesPayload,
+  CustomCategoriesPayload,
   CategorySuggestionPayload,
   DashboardData,
   ExportPayload,
@@ -48,7 +49,8 @@ const transactions = {
       internalTransfers: number;
       topCategories: Array<{ category: string; total: number }>;
     }>,
-  review: () => ipcRenderer.invoke('transactions:review') as Promise<{ transactions: ReviewTransaction[] }>
+  review: () => ipcRenderer.invoke('transactions:review') as Promise<{ transactions: ReviewTransaction[] }>,
+  all: () => ipcRenderer.invoke('transactions:all') as Promise<{ transactions: ReviewTransaction[] }>
 };
 
 const dashboard = {
@@ -72,6 +74,12 @@ const categorization = {
   override: (payload: CategoryOverrideRequest) =>
     ipcRenderer.invoke('categorization:override', payload) as Promise<CategoryRulesPayload>,
   rules: () => ipcRenderer.invoke('rules:get') as Promise<CategoryRulesPayload>
+};
+
+const categories = {
+  list: () => ipcRenderer.invoke('categories:list') as Promise<CustomCategoriesPayload>,
+  add: (category: { name: string; bucket: 'income' | 'expense' | 'transfer' }) =>
+    ipcRenderer.invoke('categories:add', category) as Promise<CustomCategoriesPayload>
 };
 
 const advisor = {
@@ -100,6 +108,7 @@ contextBridge.exposeInMainWorld('ledgerPilot', {
   settings,
   goals,
   categorization,
+  categories,
   advisor,
   backup,
   exportData,

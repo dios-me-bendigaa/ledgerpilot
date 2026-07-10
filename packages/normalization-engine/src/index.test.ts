@@ -55,4 +55,35 @@ describe('NormalizationEngine', () => {
     expect(result.report.summary.lowConfidenceTransactions).toBe(1);
     expect(result.report.summary.categories.salary).toBe(1);
   });
+
+  it('trusts the bank Category column and lets merchant overrides win', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'ledgerpilot-bankcat-'));
+    const filePath = path.join(directory, 'checking.csv');
+    await fs.writeFile(
+      filePath,
+      [
+        'Date,Description,Category,Debit,Credit,Balance',
+        '2026-01-01,SkipTheDishes,Salary,0,3500,100',      // bank says Salary -> income, not a restaurant
+        '2026-01-02,Transfer between accounts,Transfer,600,0,100', // bank Transfer -> internal_transfers
+        '2026-01-03,Remitly Transfer,Transfer,1100,0,100',  // merchant override wins -> india_expenses
+        '2026-01-04,RBC Loan Payment,Car payment,418,0,100',// bank Car payment -> car_payments
+        '2026-01-05,OBSCURE MERCHANT,Cash,50,0,100'         // unmapped bank label -> unknown/review
+      ].join('\n'),
+      'utf8',
+    );
+
+    const engine = new NormalizationEngine();
+    const { transactions } = await engine.normalizeBatch({
+      batch: createBatch(filePath),
+      sources: [{ importRecordId: 'import-1', filePath, fileName: 'checking.csv' }],
+      knownFingerprints: new Set()
+    });
+
+    const byDesc = Object.fromEntries(transactions.map((t) => [t.descriptionRaw, t.category]));
+    expect(byDesc['SkipTheDishes']).toBe('salary');
+    expect(byDesc['Transfer between accounts']).toBe('internal_transfers');
+    expect(byDesc['Remitly Transfer']).toBe('india_expenses');
+    expect(byDesc['RBC Loan Payment']).toBe('car_payments');
+    expect(byDesc['OBSCURE MERCHANT']).toBe('unknown');
+  });
 });

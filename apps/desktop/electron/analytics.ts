@@ -1,13 +1,20 @@
 import type Database from 'better-sqlite3';
 
-import type {
-  CalendarHeatmapPoint,
-  CategoryTotal,
-  DashboardComparison,
-  DashboardData,
-  DashboardKpi,
-  SankeyFlow,
-  TimeSeriesPoint
+import {
+  DEBT_CATEGORIES,
+  INCOME_CATEGORIES,
+  TRANSFER_CATEGORIES,
+  groupForCategory,
+  type CalendarHeatmapPoint,
+  type CategoryMonthComparison,
+  type CategoryTotal,
+  type DashboardComparison,
+  type DashboardData,
+  type DashboardKpi,
+  type DebtBreakdown,
+  type GroupTotal,
+  type SankeyFlow,
+  type TimeSeriesPoint
 } from '@ledgerpilot/core';
 
 type AggregateRow = {
@@ -15,6 +22,11 @@ type AggregateRow = {
   expenses: number | null;
   interestPaid: number | null;
   debtPayments: number | null;
+  debtMortgage: number | null;
+  debtCar: number | null;
+  debtRent: number | null;
+  debtCreditCard: number | null;
+  debtLoc: number | null;
   internalTransfers: number | null;
   reviewCount: number | null;
 };
@@ -22,6 +34,46 @@ type AggregateRow = {
 const safeNumber = (value: number | null | undefined) => value ?? 0;
 
 const roundCurrency = (value: number) => Number(value.toFixed(2));
+
+// Derive SQL predicates from the shared core registry so income/expense/transfer stay symmetric
+// and there is one source of truth for which categories count as spending. Single-quotes in
+// category names are escaped so user-defined names can't break the SQL.
+const sqlList = (categories: readonly string[]) => categories.map((c) => `'${c.replace(/'/g, "''")}'`).join(', ');
+
+// Custom categories registered at runtime extend the income/transfer buckets. Expense needs no
+// registration: anything negative that is not income/transfer/unknown counts as expense.
+let extraIncome: string[] = [];
+let extraTransfer: string[] = [];
+
+export const setCustomCategoryBuckets = (
+  customs: ReadonlyArray<{ name: string; bucket: 'income' | 'expense' | 'transfer' }>,
+) => {
+  extraIncome = customs.filter((c) => c.bucket === 'income').map((c) => c.name);
+  extraTransfer = customs.filter((c) => c.bucket === 'transfer').map((c) => c.name);
+};
+
+const incomeCats = () => [...INCOME_CATEGORIES, ...extraIncome];
+const transferCats = () => [...TRANSFER_CATEGORIES, ...extraTransfer];
+
+// Income: positive money in an income-flagged category.
+const incomePredicate = () =>
+  `amount > 0 AND is_internal_transfer = 0 AND category IN (${sqlList(incomeCats())})`;
+
+// Expense: negative money that is neither income nor a transfer/debt movement. Transfers between
+// the user's own accounts and debt servicing are excluded so single-account imports don't inflate
+// totals when transfer pairing can't fire. `unknown` is excluded too — those rows are pending
+// review (surfaced via reviewCount), not confirmed spend, so they never inflate either side.
+const debtCats = () => [...DEBT_CATEGORIES];
+
+const expensePredicate = () =>
+  `amount < 0 AND is_internal_transfer = 0 ` +
+  `AND category NOT IN (${sqlList([...incomeCats(), ...transferCats(), ...debtCats(), 'unknown'])})`;
+
+// Extends expensePredicate to include positive india_expenses (brother's INTERAC contributions)
+// so they net against Remitly debits. Only used in aggregates/category totals — NOT calendar
+// heatmap (don't want credit days to look like spending days).
+const netExpensePredicate = () =>
+  `(${expensePredicate()} OR (category = 'india_expenses' AND amount > 0 AND is_internal_transfer = 0))`;
 
 const makeComparison = (currentPeriod: number, previousPeriod: number): DashboardComparison => {
   const changeAmount = roundCurrency(currentPeriod - previousPeriod);
@@ -39,10 +91,15 @@ const makeComparison = (currentPeriod: number, previousPeriod: number): Dashboar
 const getAggregateRow = (database: Database.Database, whereClause?: string) => {
   const query = `
     SELECT
-      SUM(CASE WHEN category IN ('salary', 'interest_income', 'refunds') AND is_internal_transfer = 0 AND amount > 0 THEN amount ELSE 0 END) as income,
-      ABS(SUM(CASE WHEN amount < 0 AND is_internal_transfer = 0 THEN amount ELSE 0 END)) as expenses,
-      ABS(SUM(CASE WHEN category = 'interest_charges' THEN amount ELSE 0 END)) as interestPaid,
-      ABS(SUM(CASE WHEN category IN ('credit_card_payments', 'mortgage_payments', 'line_of_credit_payments') THEN amount ELSE 0 END)) as debtPayments,
+      SUM(CASE WHEN ${incomePredicate()} THEN amount ELSE 0 END) as income,
+      ABS(SUM(CASE WHEN ${netExpensePredicate()} THEN amount ELSE 0 END)) as expenses,
+      ABS(SUM(CASE WHEN category = 'interest_charges' AND amount < 0 THEN amount ELSE 0 END)) as interestPaid,
+      ABS(SUM(CASE WHEN category IN ('credit_card_payments', 'mortgage_payments', 'car_payments', 'line_of_credit_payments', 'rent') AND amount < 0 THEN amount ELSE 0 END)) as debtPayments,
+      ABS(SUM(CASE WHEN category = 'mortgage_payments' AND amount < 0 THEN amount ELSE 0 END)) as debtMortgage,
+      ABS(SUM(CASE WHEN category = 'car_payments' AND amount < 0 THEN amount ELSE 0 END)) as debtCar,
+      ABS(SUM(CASE WHEN category = 'rent' AND amount < 0 THEN amount ELSE 0 END)) as debtRent,
+      ABS(SUM(CASE WHEN category = 'credit_card_payments' AND amount < 0 THEN amount ELSE 0 END)) as debtCreditCard,
+      ABS(SUM(CASE WHEN category = 'line_of_credit_payments' AND amount < 0 THEN amount ELSE 0 END)) as debtLoc,
       SUM(CASE WHEN is_internal_transfer = 1 THEN 1 ELSE 0 END) as internalTransfers,
       SUM(CASE WHEN requires_review = 1 THEN 1 ELSE 0 END) as reviewCount
     FROM transactions
@@ -57,14 +114,43 @@ const getTopExpenseCategories = (database: Database.Database): CategoryTotal[] =
     .prepare(
       `SELECT category, ABS(SUM(amount)) as total
        FROM transactions
-       WHERE amount < 0 AND is_internal_transfer = 0
+       WHERE ${netExpensePredicate()}
        GROUP BY category
        ORDER BY total DESC
-       LIMIT 6`,
+       LIMIT 12`,
     )
     .all() as Array<{ category: string; total: number }>;
 
   return rows.map((row) => ({ category: row.category, total: roundCurrency(row.total) }));
+};
+
+// Roll every expense category up into its parent group (Home, Car, Food, ...), sorted by size,
+// with each group's category breakdown for drill-down on the dashboard.
+const getExpenseGroups = (database: Database.Database): GroupTotal[] => {
+  const rows = database
+    .prepare(
+      `SELECT category, ABS(SUM(amount)) as total
+       FROM transactions
+       WHERE ${netExpensePredicate()}
+       GROUP BY category`,
+    )
+    .all() as Array<{ category: string; total: number }>;
+
+  const groups = new Map<string, CategoryTotal[]>();
+  for (const row of rows) {
+    const group = groupForCategory(row.category);
+    const bucket = groups.get(group) ?? [];
+    bucket.push({ category: row.category, total: roundCurrency(row.total) });
+    groups.set(group, bucket);
+  }
+
+  return [...groups.entries()]
+    .map(([group, categories]) => ({
+      group,
+      total: roundCurrency(categories.reduce((sum, c) => sum + c.total, 0)),
+      categories: categories.sort((a, b) => b.total - a.total)
+    }))
+    .sort((a, b) => b.total - a.total);
 };
 
 const getTimeSeries = (database: Database.Database, format: string, limit: number): TimeSeriesPoint[] => {
@@ -72,8 +158,8 @@ const getTimeSeries = (database: Database.Database, format: string, limit: numbe
     .prepare(
       `SELECT
          strftime('${format}', posted_date) as label,
-         SUM(CASE WHEN category IN ('salary', 'interest_income', 'refunds') AND is_internal_transfer = 0 AND amount > 0 THEN amount ELSE 0 END) as income,
-         ABS(SUM(CASE WHEN amount < 0 AND is_internal_transfer = 0 THEN amount ELSE 0 END)) as expenses
+         SUM(CASE WHEN ${incomePredicate()} THEN amount ELSE 0 END) as income,
+         ABS(SUM(CASE WHEN ${netExpensePredicate()} THEN amount ELSE 0 END)) as expenses
        FROM transactions
        GROUP BY label
        ORDER BY label DESC
@@ -100,7 +186,7 @@ const getCalendarHeatmap = (database: Database.Database): CalendarHeatmapPoint[]
     .prepare(
       `SELECT posted_date as date, ABS(SUM(amount)) as expenseTotal
        FROM transactions
-       WHERE amount < 0 AND is_internal_transfer = 0
+       WHERE ${expensePredicate()}
        GROUP BY posted_date
        ORDER BY posted_date DESC
        LIMIT 90`,
@@ -115,7 +201,7 @@ const getSankeyFlows = (database: Database.Database): SankeyFlow[] => {
     .prepare(
       `SELECT account_name as source, category as target, ABS(SUM(amount)) as value
        FROM transactions
-       WHERE amount < 0 AND is_internal_transfer = 0
+       WHERE ${netExpensePredicate()}
        GROUP BY account_name, category
        ORDER BY value DESC
        LIMIT 12`,
@@ -137,6 +223,30 @@ const getPreviousMonthKey = () => {
   return `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, '0')}`;
 };
 
+const getCategoryComparisons = (database: Database.Database): CategoryMonthComparison[] => {
+  const curr = getCurrentMonthKey();
+  const prev = getPreviousMonthKey();
+  const rows = database
+    .prepare(
+      `SELECT category,
+         ABS(SUM(CASE WHEN strftime('%Y-%m', posted_date) = ? THEN amount ELSE 0 END)) as current_month,
+         ABS(SUM(CASE WHEN strftime('%Y-%m', posted_date) = ? THEN amount ELSE 0 END)) as prev_month
+       FROM transactions
+       WHERE ${netExpensePredicate()}
+       GROUP BY category
+       HAVING current_month > 0 OR prev_month > 0
+       ORDER BY current_month DESC
+       LIMIT 8`,
+    )
+    .all(curr, prev) as Array<{ category: string; current_month: number; prev_month: number }>;
+  return rows.map((row) => ({
+    category: row.category,
+    currentMonth: roundCurrency(row.current_month),
+    previousMonth: roundCurrency(row.prev_month),
+    changeAmount: roundCurrency(row.current_month - row.prev_month)
+  }));
+};
+
 const getCurrentYearKey = () => new Date().getFullYear().toString();
 
 const getPreviousYearKey = () => (new Date().getFullYear() - 1).toString();
@@ -145,8 +255,8 @@ const getPeriodNetCashFlow = (database: Database.Database, format: string, key: 
   const row = database
     .prepare(
       `SELECT
-         SUM(CASE WHEN category IN ('salary', 'interest_income', 'refunds') AND is_internal_transfer = 0 AND amount > 0 THEN amount ELSE 0 END) as income,
-         ABS(SUM(CASE WHEN amount < 0 AND is_internal_transfer = 0 THEN amount ELSE 0 END)) as expenses
+         SUM(CASE WHEN ${incomePredicate()} THEN amount ELSE 0 END) as income,
+         ABS(SUM(CASE WHEN ${netExpensePredicate()} THEN amount ELSE 0 END)) as expenses
        FROM transactions
        WHERE strftime('${format}', posted_date) = ?`,
     )
@@ -166,6 +276,15 @@ export const getDashboardData = (database: Database.Database): DashboardData => 
     Math.max(0, Math.min(100, 50 + savingsRate * 0.4 - safeNumber(aggregate.reviewCount) * 1.5 + safeNumber(aggregate.internalTransfers) * 0.2)),
   );
 
+  const debtBreakdown: DebtBreakdown = {
+    mortgage: roundCurrency(safeNumber(aggregate.debtMortgage)),
+    carPayments: roundCurrency(safeNumber(aggregate.debtCar)),
+    rent: roundCurrency(safeNumber(aggregate.debtRent)),
+    creditCard: roundCurrency(safeNumber(aggregate.debtCreditCard)),
+    lineOfCredit: roundCurrency(safeNumber(aggregate.debtLoc)),
+    total: roundCurrency(safeNumber(aggregate.debtPayments))
+  };
+
   const kpis: DashboardKpi = {
     netCashFlow,
     income,
@@ -173,6 +292,7 @@ export const getDashboardData = (database: Database.Database): DashboardData => 
     savingsRate,
     interestPaid: roundCurrency(safeNumber(aggregate.interestPaid)),
     debtPayments: roundCurrency(safeNumber(aggregate.debtPayments)),
+    debtBreakdown,
     budgetHealth,
     financialHealthScore,
     internalTransfers: safeNumber(aggregate.internalTransfers),
@@ -193,6 +313,8 @@ export const getDashboardData = (database: Database.Database): DashboardData => 
     generatedAt: new Date().toISOString(),
     kpis,
     topExpenseCategories: getTopExpenseCategories(database),
+    expenseGroups: getExpenseGroups(database),
+    categoryComparisons: getCategoryComparisons(database),
     monthlyTrend: getTimeSeries(database, '%Y-%m', 12),
     yearlyTrend: getTimeSeries(database, '%Y', 5),
     spendingCalendar: getCalendarHeatmap(database),

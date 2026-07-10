@@ -9,6 +9,7 @@ import {
   workspaceBlueprint,
   CategoryOverrideRequest,
   CategoryRulesPayload,
+  CustomCategoriesPayload,
   CategorySuggestionPayload,
   DashboardData,
   ExportPayload,
@@ -29,7 +30,7 @@ import {
 } from '@ledgerpilot/core';
 import { ImportEngine } from '@ledgerpilot/import-engine';
 
-import { getDashboardData } from './analytics.js';
+import { getDashboardData, setCustomCategoryBuckets } from './analytics.js';
 import {
   ensureAiService,
   requestAdvisorResponse,
@@ -60,6 +61,7 @@ let isReprocessing = false;
 const getWorkspaceRoot = () => path.join(app.getPath('appData'), workspaceName);
 const getDatabasePath = () => path.join(getWorkspaceRoot(), 'database', 'ledgerpilot.sqlite');
 const getCategoryRulesPath = () => path.join(getWorkspaceRoot(), 'rules', 'category-rules.json');
+const getCustomCategoriesPath = () => path.join(getWorkspaceRoot(), 'rules', 'custom-categories.json');
 const getLogPath = () => path.join(getWorkspaceRoot(), 'logs', 'desktop.log');
 
 const writeLog = async (message: string) => {
@@ -191,6 +193,31 @@ const readCategoryRules = async (): Promise<CategoryRulesPayload> => {
 const writeCategoryRules = async (payload: CategoryRulesPayload) => {
   await fs.mkdir(path.dirname(getCategoryRulesPath()), { recursive: true });
   await fs.writeFile(getCategoryRulesPath(), JSON.stringify(payload, null, 2), 'utf8');
+};
+
+const readCustomCategories = async (): Promise<CustomCategoriesPayload> => {
+  try {
+    const content = await fs.readFile(getCustomCategoriesPath(), 'utf8');
+    return JSON.parse(content) as CustomCategoriesPayload;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { categories: [] };
+    }
+    throw error;
+  }
+};
+
+const writeCustomCategories = async (payload: CustomCategoriesPayload) => {
+  await fs.mkdir(path.dirname(getCustomCategoriesPath()), { recursive: true });
+  await fs.writeFile(getCustomCategoriesPath(), JSON.stringify(payload, null, 2), 'utf8');
+};
+
+// Register custom-category buckets with analytics, then compute the dashboard. Every dashboard
+// read goes through here so custom income/transfer categories are bucketed correctly.
+const buildDashboard = async (): Promise<DashboardData> => {
+  const custom = await readCustomCategories();
+  setCustomCategoryBuckets(custom.categories);
+  return getDashboardData(database);
 };
 
 const initializeDatabase = async () => {
@@ -347,6 +374,40 @@ const getRecentTransactions = (limit = 250): ReviewTransaction[] => {
   }));
 };
 
+// Every transaction (including paired transfers), newest first — backs the full transaction view
+// where the user can reassign any row's category, not just the low-confidence review queue.
+const getAllTransactions = (limit = 5000): ReviewTransaction[] => {
+  const rows = database
+    .prepare(
+      `SELECT id, account_name, posted_at, amount, description_raw, merchant_normalized, category, confidence_score
+       FROM transactions
+       WHERE is_duplicate = 0
+       ORDER BY posted_at DESC
+       LIMIT ?`,
+    )
+    .all(limit) as Array<{
+      id: string;
+      account_name: string;
+      posted_at: string;
+      amount: number;
+      description_raw: string;
+      merchant_normalized: string;
+      category: ReviewTransaction['currentCategory'];
+      confidence_score: number;
+    }>;
+
+  return rows.map((row) => ({
+    id: row.id,
+    accountName: row.account_name,
+    postedAt: row.posted_at,
+    amount: row.amount,
+    descriptionRaw: row.description_raw,
+    merchantNormalized: row.merchant_normalized,
+    currentCategory: row.category,
+    confidenceScore: row.confidence_score
+  }));
+};
+
 const applyCategoryRuleOverrides = async (suggestions: CategorySuggestionPayload): Promise<CategorySuggestionPayload> => {
   const rules = await readCategoryRules();
 
@@ -397,9 +458,18 @@ const saveCategoryOverride = async (request: CategoryOverrideRequest) => {
 
   await writeCategoryRules({ rules: nextRules });
 
-  database
-    .prepare('UPDATE transactions SET category = ?, requires_review = 0 WHERE id = ?')
-    .run(request.category, request.transactionId);
+  // Teach once, apply to all: unless explicitly scoped to one row, re-categorize every transaction
+  // sharing this merchant pattern (existing + future imports pick it up via applyCategoryRuleOverrides).
+  if (request.applyToAll === false) {
+    database
+      .prepare('UPDATE transactions SET category = ?, requires_review = 0 WHERE id = ?')
+      .run(request.category, request.transactionId);
+  } else {
+    const result = database
+      .prepare('UPDATE transactions SET category = ?, requires_review = 0 WHERE merchant_normalized LIKE ?')
+      .run(request.category, `%${merchantPattern}%`);
+    void writeLog(`categorization:override merchant="${merchantPattern}" -> ${request.category} applied to ${result.changes} transaction(s)`);
+  }
 
   return { rules: nextRules };
 };
@@ -451,7 +521,7 @@ const buildExportPayload = async () => {
   const [settings, goals, dashboard, normalizationHistory, backups, rules] = await Promise.all([
     loadSettings(getWorkspaceRoot()),
     loadGoals(getWorkspaceRoot()),
-    Promise.resolve(getDashboardData(database)),
+    buildDashboard(),
     readNormalizationReports(),
     loadBackupHistory(getWorkspaceRoot()),
     readCategoryRules()
@@ -520,7 +590,7 @@ const registerIpcHandlers = () => {
   });
 
   ipcMain.handle('transactions:summary', async () => {
-    const dashboard = getDashboardData(database);
+    const dashboard = await buildDashboard();
     return {
       totalTransactions: getRecentTransactions(100000).length,
       income: dashboard.kpis.income,
@@ -535,8 +605,12 @@ const registerIpcHandlers = () => {
     return { transactions: getReviewTransactions() };
   });
 
+  ipcMain.handle('transactions:all', async () => {
+    return { transactions: getAllTransactions() };
+  });
+
   ipcMain.handle('dashboard:data', async () => {
-    return getDashboardData(database) as DashboardData;
+    return (await buildDashboard()) as DashboardData;
   });
 
   ipcMain.handle('settings:get', async () => {
@@ -579,6 +653,23 @@ const registerIpcHandlers = () => {
     return readCategoryRules() as Promise<CategoryRulesPayload>;
   });
 
+  ipcMain.handle('categories:list', async () => {
+    return readCustomCategories() as Promise<CustomCategoriesPayload>;
+  });
+
+  ipcMain.handle('categories:add', async (_event, category: { name: string; bucket: 'income' | 'expense' | 'transfer' }) => {
+    const name = category.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    const existing = await readCustomCategories();
+    if (!name) {
+      return existing;
+    }
+    const withoutDup = existing.categories.filter((entry) => entry.name !== name);
+    const next: CustomCategoriesPayload = { categories: [...withoutDup, { name, bucket: category.bucket }] };
+    await writeCustomCategories(next);
+    void writeLog(`categories:add name="${name}" bucket=${category.bucket}`);
+    return next;
+  });
+
   ipcMain.handle('advisor:ask', async (_event, question: string) => {
     const settings = (await loadSettings(getWorkspaceRoot())).settings;
     const goals = (await loadGoals(getWorkspaceRoot())).goals;
@@ -586,7 +677,7 @@ const registerIpcHandlers = () => {
     await ensureAiService(app.getAppPath(), app.isPackaged, process.resourcesPath);
     return requestAdvisorResponse({
       settings,
-      dashboard: getDashboardData(database),
+      dashboard: await buildDashboard(),
       goals,
       transactions: getRecentTransactions(250),
       question,
@@ -601,7 +692,7 @@ const registerIpcHandlers = () => {
     await ensureAiService(app.getAppPath(), app.isPackaged, process.resourcesPath);
     return requestSavingsPlan({
       settings,
-      dashboard: getDashboardData(database),
+      dashboard: await buildDashboard(),
       goals,
       transactions: getRecentTransactions(250),
       apiKey,
