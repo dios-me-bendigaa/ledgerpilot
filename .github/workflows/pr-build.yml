@@ -1,0 +1,79 @@
+name: pr-build
+
+# Adds a downloadable macOS build to a pull request on demand. After reviewing/approving a PR,
+# add the `build-mac` label to it: this builds signed-off test DMGs for both architectures and
+# uploads them as workflow artifacts on the run (Actions tab -> this run -> Artifacts). Re-trigger
+# by removing and re-adding the label.
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  macos-pr-build:
+    if: github.event.label.name == 'build-mac'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target_arch: arm64
+            python_arch: arm64
+          - target_arch: x64
+            python_arch: x64
+    runs-on: macos-15
+    env:
+      TARGET_ARCH: ${{ matrix.target_arch }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm install
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: ${{ matrix.python_arch }}
+
+      - name: Install Python dependencies
+        run: pip install -r apps/ai-service/requirements.txt
+
+      - name: Verify workspace
+        run: npm run build && npm run lint && npm run typecheck && npm run test && pytest apps/ai-service/tests
+
+      - name: Build Python sidecar
+        run: |
+          cd apps/ai-service
+          python3 -m PyInstaller run.py \
+            --onefile \
+            --name ledgerpilot-ai \
+            --distpath dist \
+            --workpath /tmp/pyinstaller-build \
+            --specpath /tmp/pyinstaller-spec \
+            --noconfirm
+
+      - name: Package desktop app
+        working-directory: apps/desktop
+        run: npm run build && npx electron-builder --mac dmg --$TARGET_ARCH
+
+      - name: Locate DMG artifact
+        run: ls apps/desktop/release
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LedgerPilot-${{ matrix.target_arch }}-dmg
+          path: apps/desktop/release/*.dmg
+          retention-days: 14
+          if-no-files-found: error
