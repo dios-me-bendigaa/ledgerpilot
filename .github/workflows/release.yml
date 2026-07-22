@@ -9,7 +9,10 @@ permissions:
   contents: write
 
 jobs:
-  macos-release:
+  # Build each architecture in parallel and hand the DMG off as a workflow artifact. Building and
+  # publishing are split so the two arch jobs never race to create/publish the same release (which
+  # previously left the slower arch's DMG unattachable to an already-published, immutable release).
+  build:
     strategy:
       fail-fast: false
       matrix:
@@ -65,7 +68,31 @@ jobs:
       - name: Locate DMG artifact
         run: ls apps/desktop/release
 
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg-${{ matrix.target_arch }}
+          path: apps/desktop/release/*.dmg
+          if-no-files-found: error
+
+  # Single publish step: collect every arch's DMG and attach them all to one release. Running once,
+  # after both builds succeed, avoids the parallel-publish race entirely.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download DMG artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dmg-*
+          path: dist
+          merge-multiple: true
+
+      - name: List DMGs
+        run: ls -la dist
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: apps/desktop/release/*.dmg
+          files: dist/*.dmg

@@ -4,7 +4,7 @@ Local-first, AI-assisted personal finance desktop app for macOS. Raw financial d
 on-device by default. This file tracks **what works today** vs **the desired end state** for the
 final version. Update it as functionality lands.
 
-_Last updated: 2026-07-20 · Version: 2.0.1_
+_Last updated: 2026-07-20 · Version: 2.0.2_
 
 ---
 
