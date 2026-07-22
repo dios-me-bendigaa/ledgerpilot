@@ -458,17 +458,24 @@ const saveCategoryOverride = async (request: CategoryOverrideRequest) => {
 
   await writeCategoryRules({ rules: nextRules });
 
-  // Teach once, apply to all: unless explicitly scoped to one row, re-categorize every transaction
-  // sharing this merchant pattern (existing + future imports pick it up via applyCategoryRuleOverrides).
-  if (request.applyToAll === false) {
-    database
-      .prepare('UPDATE transactions SET category = ?, requires_review = 0 WHERE id = ?')
-      .run(request.category, request.transactionId);
-  } else {
+  // Always allocate the transaction the user actually clicked, so the dashboard reflects it even
+  // when the merchant pattern is empty or would not match via the propagation query below.
+  database
+    .prepare('UPDATE transactions SET category = ?, requires_review = 0 WHERE id = ?')
+    .run(request.category, request.transactionId);
+
+  // Teach once, apply to all: unless explicitly scoped to one row, re-categorize sibling transactions
+  // that share this exact merchant (existing + future imports pick it up via applyCategoryRuleOverrides).
+  // Match on equality rather than a `LIKE %pattern%` substring: an empty/short pattern would otherwise
+  // match unrelated rows (empty -> every row), silently corrupting categories and dashboard totals.
+  const trimmedPattern = merchantPattern.trim();
+  if (request.applyToAll !== false && trimmedPattern.length > 0) {
     const result = database
-      .prepare('UPDATE transactions SET category = ?, requires_review = 0 WHERE merchant_normalized LIKE ?')
-      .run(request.category, `%${merchantPattern}%`);
-    void writeLog(`categorization:override merchant="${merchantPattern}" -> ${request.category} applied to ${result.changes} transaction(s)`);
+      .prepare('UPDATE transactions SET category = ?, requires_review = 0 WHERE merchant_normalized = ? AND id != ?')
+      .run(request.category, merchantPattern, request.transactionId);
+    void writeLog(`categorization:override merchant="${merchantPattern}" -> ${request.category} applied to ${result.changes + 1} transaction(s)`);
+  } else {
+    void writeLog(`categorization:override single txn=${request.transactionId} -> ${request.category}`);
   }
 
   return { rules: nextRules };
