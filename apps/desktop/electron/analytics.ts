@@ -4,6 +4,7 @@ import {
   DEBT_CATEGORIES,
   INCOME_CATEGORIES,
   TRANSFER_CATEGORIES,
+  classifyAccountDebtType,
   groupForCategory,
   type CalendarHeatmapPoint,
   type CategoryMonthComparison,
@@ -11,7 +12,9 @@ import {
   type DashboardComparison,
   type DashboardData,
   type DashboardKpi,
+  type DebtAccountSummary,
   type DebtBreakdown,
+  type DebtSummary,
   type GroupTotal,
   type SankeyFlow,
   type TimeSeriesPoint
@@ -44,12 +47,20 @@ const sqlList = (categories: readonly string[]) => categories.map((c) => `'${c.r
 // registration: anything negative that is not income/transfer/unknown counts as expense.
 let extraIncome: string[] = [];
 let extraTransfer: string[] = [];
+// Categories whose positive-amount transactions net against their own negative-amount
+// transactions when computing spend aggregates (e.g. a remittance sent out, partly reimbursed
+// back in — both legitimately belong to the same category, and only the net matters for
+// "how much did this actually cost"). 'india_expenses' is a built-in default so existing users'
+// dashboards keep behaving exactly as before; any custom category can opt in via nettingEnabled.
+let nettingCategories: string[] = ['india_expenses'];
 
 export const setCustomCategoryBuckets = (
-  customs: ReadonlyArray<{ name: string; bucket: 'income' | 'expense' | 'transfer' }>,
+  customs: ReadonlyArray<{ name: string; bucket: 'income' | 'expense' | 'transfer'; nettingEnabled?: boolean }>,
 ) => {
   extraIncome = customs.filter((c) => c.bucket === 'income').map((c) => c.name);
   extraTransfer = customs.filter((c) => c.bucket === 'transfer').map((c) => c.name);
+  const customNetting = customs.filter((c) => c.nettingEnabled).map((c) => c.name);
+  nettingCategories = [...new Set(['india_expenses', ...customNetting])];
 };
 
 const incomeCats = () => [...INCOME_CATEGORIES, ...extraIncome];
@@ -69,11 +80,13 @@ const expensePredicate = () =>
   `amount < 0 AND is_internal_transfer = 0 ` +
   `AND category NOT IN (${sqlList([...incomeCats(), ...transferCats(), ...debtCats(), 'unknown'])})`;
 
-// Extends expensePredicate to include positive india_expenses (brother's INTERAC contributions)
-// so they net against Remitly debits. Only used in aggregates/category totals — NOT calendar
-// heatmap (don't want credit days to look like spending days).
+// Extends expensePredicate to include positive-amount transactions in any netting-enabled
+// category (built-in: india_expenses; plus any custom category with nettingEnabled) so a partial
+// reimbursement/return nets against the original outgoing amount rather than counting as separate
+// income. Only used in aggregates/category totals — NOT the calendar heatmap (don't want credit
+// days to look like spending days).
 const netExpensePredicate = () =>
-  `(${expensePredicate()} OR (category = 'india_expenses' AND amount > 0 AND is_internal_transfer = 0))`;
+  `(${expensePredicate()} OR (category IN (${sqlList(nettingCategories)}) AND amount > 0 AND is_internal_transfer = 0))`;
 
 const makeComparison = (currentPeriod: number, previousPeriod: number): DashboardComparison => {
   const changeAmount = roundCurrency(currentPeriod - previousPeriod);
@@ -265,6 +278,75 @@ const getPeriodNetCashFlow = (database: Database.Database, format: string, key: 
   return roundCurrency(safeNumber(row.income) - safeNumber(row.expenses));
 };
 
+// Real outstanding debt — what you actually still owe, not just what flowed through payment
+// categories this period. For every account that (a) looks like a credit card or line of credit
+// by name and (b) has at least one row with a captured balance_after (only present when the
+// source CSV had a running-balance column), takes that account's MOST RECENT balance as the
+// current amount owed, and sums across every such account. Separately reports how much of that
+// account's payment activity was interest vs. actual debt reduction, so a $200 LOC payment where
+// $30 was interest_charges and $170 was line_of_credit_payments shows as "interest: $30, went
+// toward the balance: $170" instead of one undifferentiated "$200 paid" figure.
+const getDebtSummary = (database: Database.Database): DebtSummary => {
+  const accountRows = database
+    .prepare(
+      `SELECT DISTINCT account_name as accountName
+       FROM transactions
+       WHERE balance_after IS NOT NULL`,
+    )
+    .all() as Array<{ accountName: string }>;
+
+  const debtAccountNames = accountRows
+    .map((row) => row.accountName)
+    .filter((accountName) => {
+      const type = classifyAccountDebtType(accountName);
+      return type === 'credit_card' || type === 'line_of_credit';
+    });
+
+  if (debtAccountNames.length === 0) {
+    return { accounts: [], totalOutstanding: 0, hasBalanceData: false };
+  }
+
+  const latestBalanceStmt = database.prepare(
+    `SELECT balance_after as balanceAfter, posted_at as postedAt
+     FROM transactions
+     WHERE account_name = ? AND balance_after IS NOT NULL
+     ORDER BY posted_at DESC, id DESC
+     LIMIT 1`,
+  );
+
+  const interestPrincipalStmt = database.prepare(
+    `SELECT
+       ABS(SUM(CASE WHEN category = 'interest_charges' AND amount < 0 THEN amount ELSE 0 END)) as interestPortion,
+       ABS(SUM(CASE WHEN category IN ('line_of_credit_payments', 'credit_card_payments') AND amount < 0 THEN amount ELSE 0 END)) as principalPortion
+     FROM transactions
+     WHERE account_name = ?`,
+  );
+
+  const accounts: DebtAccountSummary[] = debtAccountNames.map((accountName) => {
+    const latest = latestBalanceStmt.get(accountName) as { balanceAfter: number; postedAt: string } | undefined;
+    const split = interestPrincipalStmt.get(accountName) as { interestPortion: number | null; principalPortion: number | null };
+    const accountType = classifyAccountDebtType(accountName);
+
+    return {
+      accountName,
+      accountType: accountType === 'credit_card' || accountType === 'line_of_credit' ? accountType : 'other',
+      // Outstanding balance is what's OWED, regardless of whether the bank's own statement
+      // convention represents that as negative (a ledger of "spent minus paid") or positive —
+      // ABS() normalizes both conventions to a plain "amount owed" figure for display.
+      outstandingBalance: roundCurrency(Math.abs(safeNumber(latest?.balanceAfter))),
+      asOfDate: latest?.postedAt ?? '',
+      interestPortion: roundCurrency(safeNumber(split.interestPortion)),
+      principalPortion: roundCurrency(safeNumber(split.principalPortion))
+    };
+  });
+
+  return {
+    accounts: accounts.sort((a, b) => b.outstandingBalance - a.outstandingBalance),
+    totalOutstanding: roundCurrency(accounts.reduce((sum, account) => sum + account.outstandingBalance, 0)),
+    hasBalanceData: true
+  };
+};
+
 export const getDashboardData = (database: Database.Database): DashboardData => {
   const aggregate = getAggregateRow(database);
   const income = roundCurrency(safeNumber(aggregate.income));
@@ -320,6 +402,7 @@ export const getDashboardData = (database: Database.Database): DashboardData => 
     spendingCalendar: getCalendarHeatmap(database),
     sankeyFlows: getSankeyFlows(database),
     monthlyComparison,
-    yearlyComparison
+    yearlyComparison,
+    debtSummary: getDebtSummary(database)
   };
 };

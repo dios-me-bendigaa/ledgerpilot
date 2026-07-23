@@ -1,0 +1,5 @@
+Filter,Date,Description,Sub-description,Status,Type of Transaction,Amount
+,2026-06-25,payment from - *****10*89,89,posted,Credit,300.00
+,2026-06-20,advance to - *****10*89,89,posted,Debit,-500.00
+,2026-06-15,interest charges cash,,posted,Debit,42.35
+,2026-06-08,payment from - *****10*89,89,posted,Credit,300.00

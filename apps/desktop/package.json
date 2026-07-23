@@ -1,6 +1,6 @@
 {
   "name": "@ledgerpilot/desktop",
-  "version": "2.0.2",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "description": "Local-first AI personal finance desktop app for macOS.",
@@ -12,6 +12,8 @@
     "dev": "concurrently -k -n vite,electron -c cyan,yellow \"vite\" \"npm run dev:electron\"",
     "dev:electron": "wait-on tcp:127.0.0.1:5173 && npm run build:electron && cross-env NODE_ENV=development electron .",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"electron/**/*.ts\"",
+    "postinstall": "electron-rebuild -f -w better-sqlite3",
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
     "prepackage:mac": "cd ../ai-service && python3 -m PyInstaller run.py --onefile --name ledgerpilot-ai --distpath dist --workpath /tmp/pyinstaller-build --specpath /tmp/pyinstaller-spec --noconfirm",
     "package:mac": "npm run build && electron-builder --mac dmg --$TARGET_ARCH",
     "test": "vitest run",
@@ -24,10 +26,13 @@
     "@ledgerpilot/ui": "1.0.0",
     "better-sqlite3": "^11.8.1",
     "clsx": "^2.1.1",
+    "lucide-react": "^1.25.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "recharts": "^3.10.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
     "@types/better-sqlite3": "^7.6.12",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

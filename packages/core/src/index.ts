@@ -6,13 +6,27 @@ export const workspaceBlueprint = [
   'ai/embeddings',
   'rules',
   'reports',
-  'logs',
   'settings',
   'cache',
   'backups'
 ] as const;
 
 export type WorkspaceEntry = (typeof workspaceBlueprint)[number];
+
+// A single entry in the multi-workspace registry — metadata only, not the workspace's actual
+// data (transactions/settings/goals/etc. live under workspaces/<id>/ using the same
+// workspaceBlueprint layout as before). The registry itself lives one level up, alongside the
+// workspaces/ directory, so it isn't scoped to (or duplicated inside) any single workspace.
+export type WorkspaceRegistryEntry = {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastOpenedAt: string;
+};
+
+export type WorkspaceRegistry = {
+  workspaces: WorkspaceRegistryEntry[];
+};
 
 export const maxImportFilesPerBatch = 10;
 
@@ -152,6 +166,29 @@ export const spendBucket = (category: TransactionCategory, amount: number): Spen
   return 'expense';
 };
 
+// Classifies an account by name into a debt-account type — the same regex patterns the
+// normalization engine uses for its account-context classification step, shared here so the
+// dashboard's "real outstanding debt" aggregation (sum of latest balances across every credit
+// card / line of credit account) uses the identical definition of "this is a debt account" rather
+// than an independently-drifting copy.
+export type AccountDebtType = 'credit_card' | 'line_of_credit' | 'mortgage' | 'car_loan' | 'other';
+
+export const classifyAccountDebtType = (accountName: string): AccountDebtType => {
+  const normalized = accountName
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (/credit card|mastercard|visa|\bcc\b/.test(normalized)) return 'credit_card';
+  if (/line of credit|\bloc\b|marge de credit|marge credit|ligne de credit/.test(normalized)) return 'line_of_credit';
+  if (/mortgage|hypotheque/.test(normalized)) return 'mortgage';
+  if (/car loan|auto loan|vehicle loan/.test(normalized)) return 'car_loan';
+  return 'other';
+};
+
 // UI-facing ordered list of built-in categories, grouped income -> expense -> transfer -> unknown.
 // The review-queue dropdown is driven from this so new categories never get missed.
 export const ALL_CATEGORIES: TransactionCategory[] = [
@@ -233,6 +270,11 @@ export type NormalizedTransaction = {
   transferPairKey?: string;
   requiresReview: boolean;
   metadataJson: string;
+  // The account's running balance immediately after this transaction posted, when the source CSV
+  // provides one (many bank exports do — e.g. a trailing "Balance" column). Used to compute real
+  // outstanding debt (credit card / line of credit balances actually owed) instead of just summing
+  // payment flows, which only shows money movement, not what's still owed.
+  balanceAfter?: number;
 };
 
 export type ReviewCandidate = {
@@ -257,6 +299,13 @@ export type NormalizationSummary = {
     start: string;
     end: string;
   };
+  // Rows that could not be cleanly parsed (column-count mismatch vs. header, or a non-numeric
+  // amount cell) and were either recovered heuristically (kept, flagged for review) or dropped
+  // outright because no usable amount could be found. Surfaced so a bad/messy source file never
+  // silently loses transactions with zero user-visible signal.
+  malformedRowCount: number;
+  droppedRowCount: number;
+  malformedRowSamples: string[];
 };
 
 export type NormalizationReport = {
@@ -283,6 +332,31 @@ export type DebtBreakdown = {
   creditCard: number;
   lineOfCredit: number;
   total: number;
+};
+
+// Real outstanding balance owed on a single debt account (credit card or line of credit), derived
+// from the account's own latest running balance (when the source CSV provides one) rather than
+// just summed payment flows — "total debt" means what you still owe, not what you paid this month.
+export type DebtAccountSummary = {
+  accountName: string;
+  accountType: 'credit_card' | 'line_of_credit' | 'other';
+  outstandingBalance: number;
+  asOfDate: string;
+  // Of the payments posted to this account in the current window, how much was interest vs.
+  // actually reducing what's owed — a $200 LOC payment where $30 was interest_charges and $170 was
+  // line_of_credit_payments is reported as interestPortion=30, principalPortion=170, not just "$200
+  // paid" with no indication of how much of that was truly progress against the balance.
+  interestPortion: number;
+  principalPortion: number;
+};
+
+export type DebtSummary = {
+  accounts: DebtAccountSummary[];
+  totalOutstanding: number;
+  // True only when at least one debt account's source CSV included a running balance column —
+  // lets the UI say "here's your real total debt" vs. "we can't compute a real balance from this
+  // data, only payment flows" instead of silently showing $0 as if there were no debt at all.
+  hasBalanceData: boolean;
 };
 
 export type DashboardKpi = {
@@ -355,13 +429,17 @@ export type DashboardData = {
   sankeyFlows: SankeyFlow[];
   monthlyComparison: DashboardComparison;
   yearlyComparison: DashboardComparison;
+  debtSummary: DebtSummary;
 };
 
-export type AiProvider = 'local-rules' | 'ollama' | 'openai-compatible';
+export type AiProvider = 'local-rules' | 'ollama' | 'openai-compatible' | 'claude';
 
 export type ProviderSettings = {
   localModel?: string;
   ollamaModel?: string;
+  // Reused across openai-compatible and claude — both are "cloud model name" fields, just for a
+  // different provider; kept as one field rather than two nearly-identical ones.
+  cloudModel?: string;
   apiBaseUrl?: string;
   apiKeyConfigured: boolean;
 };
@@ -375,6 +453,16 @@ export type AppSettings = {
   telemetryEnabled: boolean;
   backupDirectory?: string;
   importHistoryRetentionDays: number;
+  // ISO 4217 code (e.g. "CAD", "INR", "USD") used as: (a) the fallback currency for rows whose
+  // source CSV gives no per-row currency signal, and (b) the display currency for aggregate KPIs.
+  // Aggregates are NOT converted across currencies (no fabricated FX rate) — a transaction posted
+  // in a different currency is tracked accurately as itself, and surfaced as "other currency", not
+  // silently summed into the home-currency totals as if it were 1:1.
+  homeCurrency: string;
+  // Set once the user has completed the mandatory first-run AI provider setup (chosen and
+  // successfully verified a real provider — local-rules alone does not satisfy this). Gates
+  // whether the blocking setup screen shows on launch.
+  aiSetupCompleted: boolean;
 };
 
 export type SettingsPayload = {
@@ -514,6 +602,12 @@ export type CategoryOverrideRequest = {
 export type CustomCategory = {
   name: string;
   bucket: SpendBucket;
+  // When true, positive-amount transactions in this category are netted against negative-amount
+  // transactions in the same category when computing spend aggregates (e.g. someone reimbursing
+  // part of a remittance you sent). Generalizes what was previously a single hardcoded special
+  // case (india_expenses vs. Remitly) into a mechanism any category — and any user's specific
+  // remittance/reimbursement pattern — can opt into.
+  nettingEnabled?: boolean;
 };
 
 export type CustomCategoriesPayload = {

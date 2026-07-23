@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import type {
@@ -15,6 +16,18 @@ import type {
 const aiServicePort = 8877;
 const aiServiceUrl = `http://127.0.0.1:${aiServicePort}`;
 let aiProcess: ChildProcess | undefined;
+// Rolling buffer of the sidecar's stderr so a failed-to-start error can surface *why* (Python
+// traceback, missing dependency, port bind failure) instead of just "AI service failed to start
+// locally." Capped so a crash-looping process can't grow this unbounded.
+let recentStderr: string[] = [];
+const MAX_STDERR_LINES = 40;
+const recordStderrChunk = (chunk: Buffer | string) => {
+  const lines = chunk.toString('utf8').split(/\r?\n/).filter((line) => line.length > 0);
+  recentStderr.push(...lines);
+  if (recentStderr.length > MAX_STDERR_LINES) {
+    recentStderr = recentStderr.slice(-MAX_STDERR_LINES);
+  }
+};
 
 const postJson = async <T>(endpoint: string, payload: unknown): Promise<T> => {
   const response = await fetch(`${aiServiceUrl}${endpoint}`, {
@@ -49,28 +62,42 @@ export const ensureAiService = async (
   }
 
   if (!aiProcess) {
+    recentStderr = [];
     if (isPackaged) {
       const binaryPath = path.join(resourcesPath, 'ai-service', 'ledgerpilot-ai');
       aiProcess = spawn(binaryPath, [], {
         env: { ...process.env, LEDGER_AI_PORT: String(aiServicePort) },
-        stdio: 'ignore',
+        stdio: ['ignore', 'ignore', 'pipe'],
       });
     } else {
       const repoRoot = path.resolve(desktopAppPath, '..', '..');
       const servicePath = path.join(repoRoot, 'apps', 'ai-service');
       // Prefer venv python so dependencies are always available without system-wide install
       const venvPython = path.join(servicePath, '.venv', 'bin', 'python3');
-      const python = require('node:fs').existsSync(venvPython) ? venvPython : 'python3';
+      const python = existsSync(venvPython) ? venvPython : 'python3';
       aiProcess = spawn(
         python,
         ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(aiServicePort)],
         {
           cwd: servicePath,
           env: process.env,
-          stdio: 'ignore',
+          stdio: ['ignore', 'ignore', 'pipe'],
         },
       );
     }
+
+    aiProcess.stderr?.on('data', recordStderrChunk);
+
+    // Without these listeners, a crashed/killed sidecar leaves `aiProcess` as a stale non-null
+    // reference. The `if (!aiProcess)` guard above would then skip respawning forever (it would
+    // burn the retry budget below against a dead port and throw) until a full Electron restart.
+    // Clearing the reference on exit/error lets the next ensureAiService() call respawn cleanly.
+    aiProcess.on('exit', () => {
+      aiProcess = undefined;
+    });
+    aiProcess.on('error', () => {
+      aiProcess = undefined;
+    });
   }
 
   for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -85,7 +112,8 @@ export const ensureAiService = async (
     await delay(250);
   }
 
-  throw new Error('AI service failed to start locally.');
+  const diagnostic = recentStderr.length > 0 ? `\n\nLast output from AI service:\n${recentStderr.join('\n')}` : '';
+  throw new Error(`AI service failed to start locally.${diagnostic}`);
 };
 
 export const shutdownAiService = () => {
@@ -93,12 +121,42 @@ export const shutdownAiService = () => {
   aiProcess = undefined;
 };
 
+const defaultModelFor = (settings: AppSettings): string => {
+  if (settings.aiProvider === 'ollama') return settings.providerSettings.ollamaModel ?? 'llama3.1';
+  if (settings.aiProvider === 'claude') return settings.providerSettings.cloudModel || 'claude-3-5-sonnet-20241022';
+  if (settings.aiProvider === 'openai-compatible') return settings.providerSettings.cloudModel || 'gpt-4o-mini';
+  return 'llama3.1';
+};
+
+const defaultBaseUrlFor = (settings: AppSettings): string => {
+  if (settings.aiProvider === 'claude') return settings.providerSettings.apiBaseUrl || 'https://api.anthropic.com';
+  return settings.providerSettings.apiBaseUrl || 'http://127.0.0.1:11434';
+};
+
 const providerFields = (settings: AppSettings, apiKey?: string) => ({
   provider: settings.aiProvider,
-  model: settings.providerSettings.ollamaModel ?? 'llama3.1',
-  base_url: settings.providerSettings.apiBaseUrl ?? 'http://127.0.0.1:11434',
-  api_key: apiKey ?? null,
+  model: defaultModelFor(settings),
+  base_url: defaultBaseUrlFor(settings),
+  // Only attach the real API key for providers that actually need one — previously this was sent
+  // unconditionally, meaning a configured OpenAI/Claude key was transmitted to the sidecar even
+  // for plain local-rules/ollama requests where it's never used.
+  api_key: settings.aiProvider === 'openai-compatible' || settings.aiProvider === 'claude' ? apiKey ?? null : null,
 });
+
+export const testProviderConnection = async (payload: {
+  provider: AppSettings['aiProvider'];
+  model?: string;
+  baseUrl?: string;
+  apiKey?: string;
+}): Promise<{ success: boolean; message: string; sampleReply?: string }> => {
+  const raw = await postJson<{ success: boolean; message: string; sample_reply?: string }>('/provider/test', {
+    provider: payload.provider,
+    model: payload.model || null,
+    base_url: payload.baseUrl || null,
+    api_key: payload.apiKey || null
+  });
+  return { success: raw.success, message: raw.message, sampleReply: raw.sample_reply };
+};
 
 export const requestAdvisorResponse = async (payload: {
   settings: AppSettings;

@@ -1,11 +1,31 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+import re
+from collections import defaultdict
+from datetime import date, datetime, timedelta
 from typing import Literal, Optional
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from app import providers
+
+
+# "Needed" vs "wasteful" tiers for expense categories — used by the advisor to actually answer
+# "which of my expenses are waste" instead of just listing top categories by size regardless of
+# whether they're essential. Deliberately conservative: anything ambiguous (india_expenses,
+# remittances, insurance, taxes) is left OUT of "discretionary" rather than risk labeling a real
+# obligation as waste.
+ESSENTIAL_CATEGORIES = {
+    'groceries', 'home_utilities', 'mobile', 'internet', 'bill_payments', 'utilities',
+    'insurance', 'car_insurance', 'home_insurance', 'fuel', 'rent', 'mortgage_payments',
+    'property_tax', 'taxes', 'car_payments', 'india_expenses',
+}
+DISCRETIONARY_CATEGORIES = {
+    'restaurants', 'shopping', 'travel', 'vacation', 'lifestyle',
+}
+# Pure cost with no offsetting value — always called out separately, never "discretionary" (that
+# framing implies a choice; a bank fee or interest charge is a cost to eliminate outright).
+PURE_COST_CATEGORIES = {'fees', 'interest_charges'}
 
 
 class HealthResponse(BaseModel):
@@ -74,7 +94,7 @@ class TransactionInput(BaseModel):
 
 
 class AdvisorRequest(BaseModel):
-    provider: Literal['local-rules', 'ollama', 'openai-compatible']
+    provider: Literal['local-rules', 'ollama', 'openai-compatible', 'claude']
     question: str
     dashboard: DashboardSnapshot
     transactions: list[TransactionInput] = Field(default_factory=list)
@@ -138,7 +158,7 @@ class CategorizationSuggestion(BaseModel):
 
 
 class CategorizationRequest(BaseModel):
-    provider: Literal['local-rules', 'ollama', 'openai-compatible']
+    provider: Literal['local-rules', 'ollama', 'openai-compatible', 'claude']
     transactions: list[TransactionInput]
     model: Optional[str] = None
     base_url: Optional[str] = None
@@ -161,6 +181,16 @@ def _days_until(deadline: str) -> int:
     return max((_parse_date(deadline) - date.today()).days, 1)
 
 
+def _add_days(base: date, days: float) -> date:
+    """Adds a (possibly large) number of days to a date without raising on absurd inputs — a
+    goal that's barely making progress can project centuries out, which should read as "not
+    reachable on this trajectory" rather than crash the endpoint."""
+    try:
+        return date.fromordinal(min(base.toordinal() + int(round(days)), date.max.toordinal()))
+    except (ValueError, OverflowError):
+        return date(9999, 12, 31)
+
+
 def _estimate_goal_forecasts(
     goals: list[GoalInput],
     cut_savings: float,
@@ -176,6 +206,19 @@ def _estimate_goal_forecasts(
 
         max_reachable = round(max(total_monthly_available * months_left + goal.current_amount, goal.current_amount), 2)
         pct_reachable = max_reachable / goal.target_amount if goal.target_amount > 0 else 1.0
+
+        # Realistic completion date for the FULL original target at the achievable monthly pace —
+        # this is the "keep the same target, just push the deadline out" alternative. Computed up
+        # front so shortfall/needs_income_boost messages below can state it as a concrete option
+        # instead of just reporting the gap.
+        reachable_at_all = total_monthly_available > 0
+        if remaining <= 0:
+            projected = date.today()
+        elif reachable_at_all:
+            months_to_complete = min(remaining / total_monthly_available, 1200)
+            projected = _add_days(date.today(), months_to_complete * 30)
+        else:
+            projected = date(9999, 12, 31)  # never, at zero or negative net savings capacity
 
         if total_monthly_available >= monthly_required:
             if avg_monthly_net >= monthly_required:
@@ -195,30 +238,35 @@ def _estimate_goal_forecasts(
                 )
         else:
             shortfall = round(monthly_required - total_monthly_available, 2)
+            # Two concrete, always-computed alternatives to "you're short": accept a lower amount
+            # by the original deadline, or keep the full amount and accept a later date. Whichever
+            # verdict below, the user gets a real recalculated option — not just a gap to close.
+            if not reachable_at_all:
+                alt_option = (
+                    "At your current spending, even with every recommended cut you have $0 or less "
+                    "left over each month, so this goal isn't reachable on any timeline until income "
+                    "rises or spending drops further."
+                )
+            else:
+                alt_option = (
+                    f"Realistic alternatives: settle for ${max_reachable:.0f} by your original deadline, "
+                    f"or keep the full ${goal.target_amount:.0f} target and expect to reach it by "
+                    f"{projected.isoformat()} instead."
+                )
             if shortfall > avg_monthly_net * 0.25:
                 verdict = 'needs_income_boost'
-                reachable_str = f"${max_reachable:.0f}" if max_reachable > 0 else "nothing"
                 message = (
-                    f"This goal requires ${monthly_required:.0f}/month. After all spending cuts "
-                    f"you'd have ${max(total_monthly_available, 0):.0f}/month to save — "
-                    f"you'll reach {reachable_str} by the deadline. "
-                    f"To close the ${shortfall:.0f}/month gap you need to either increase income or extend the deadline."
+                    f"This goal requires ${monthly_required:.0f}/month, but even after all recommended "
+                    f"cuts you'd only have ${max(total_monthly_available, 0):.0f}/month to save — a "
+                    f"${shortfall:.0f}/month gap that spending cuts alone can't close. {alt_option}"
                 )
             else:
                 verdict = 'shortfall'
                 message = (
                     f"You're ${shortfall:.0f}/month short of the ${monthly_required:.0f}/month needed. "
-                    f"At current trajectory you'll reach ${max_reachable:.0f} by the deadline. "
-                    f"Cut an extra ${shortfall:.0f}/month from discretionary spend to hit this goal."
+                    f"Cutting an extra ${shortfall:.0f}/month from discretionary spend would hit the original "
+                    f"plan exactly. {alt_option}"
                 )
-
-        months_to_complete = min(remaining / max(total_monthly_available, 0.01), 600) if remaining > 0 and total_monthly_available > 0 else 600
-        try:
-            projected = date.today().replace(day=1).fromordinal(
-                date.today().replace(day=1).toordinal() + int(round(months_to_complete * 30))
-            ) if remaining > 0 else date.today()
-        except (ValueError, OverflowError):
-            projected = date(9999, 12, 31)
 
         success_probability = min(100.0, round((total_monthly_available / max(monthly_required, 1)) * 70 + 30, 1))
 
@@ -237,6 +285,61 @@ def _estimate_goal_forecasts(
         )
 
     return forecasts
+
+
+def _investment_guidance_insight(
+    request: AdvisorRequest,
+    debt_pct: float,
+    interest: float,
+    avg_monthly_income: float,
+    savings_rate: float,
+    num_months: int,
+) -> Optional[FinancialHealthInsight]:
+    """Educational-only investing guidance, shared by the financial-health summary and the advisor
+    chat. Never names a specific product, fund, ticker, or timing — this app is not licensed to
+    give investment advice, only general sequencing principles (debt first, then buffer, then
+    invest), and only once the prior step is actually in place."""
+    kpis = request.dashboard.kpis
+    monthly_expenses = kpis.expenses / max(num_months, 1)
+    emergency_goal = next((g for g in request.goals if 'emergency' in g.name.lower()), None)
+    has_healthy_buffer = emergency_goal is not None and emergency_goal.current_amount >= monthly_expenses * 3
+
+    if debt_pct > 20 or interest > avg_monthly_income * 0.05:
+        return FinancialHealthInsight(
+            title='Pay down debt before investing',
+            metric=f'${interest:.0f} in interest and {debt_pct:.0f}% debt-to-income this period',
+            recommendation=(
+                'Educational note, not investment advice: interest on credit cards or lines of credit '
+                'typically exceeds realistic investment returns, so paying down high-interest debt first '
+                'is usually the higher-value move before directing money into investments.'
+            ),
+            severity='warning',
+        )
+    if savings_rate >= 15:
+        if not has_healthy_buffer:
+            return FinancialHealthInsight(
+                title='Build your emergency fund first',
+                metric=f'Target buffer: ~${monthly_expenses * 3:.0f}\u2013${monthly_expenses * 6:.0f} (3\u20136 months of expenses)',
+                recommendation=(
+                    'Educational note, not investment advice: with debt under control and a healthy savings '
+                    'rate, a common next step is holding 3\u20136 months of expenses in an easily accessible '
+                    'account before investing further, so an emergency never forces you to sell investments '
+                    'or take on high-interest debt.'
+                ),
+                severity='good',
+            )
+        return FinancialHealthInsight(
+            title='Fundamentals are in place for further investing',
+            metric=f'Savings rate {savings_rate:.1f}%, debt-to-income {debt_pct:.0f}%, buffer already funded',
+            recommendation=(
+                'Educational note, not investment advice: with debt low, savings healthy, and a buffer '
+                'already funded, many people at this stage look into low-cost, diversified, long-horizon '
+                'investing. Speak with a licensed financial advisor for guidance specific to your goals, '
+                'tax situation, and risk tolerance \u2014 this app does not recommend specific products or timing.'
+            ),
+            severity='good',
+        )
+    return None
 
 
 def _financial_health_summary(request: AdvisorRequest, cut_savings: float) -> list[FinancialHealthInsight]:
@@ -351,6 +454,13 @@ def _financial_health_summary(request: AdvisorRequest, cut_savings: float) -> li
                 severity='alert',
             ))
 
+    # Educational-only investing guidance. This app is not licensed to give investment advice, so
+    # this deliberately never names a specific product, fund, ticker, or timing — only general
+    # sequencing principles, and only once debt/buffer fundamentals are actually in place.
+    investment_insight = _investment_guidance_insight(request, debt_pct, interest, avg_monthly_income, savings_rate, num_months)
+    if investment_insight is not None:
+        insights.append(investment_insight)
+
     return insights
 
 
@@ -368,54 +478,301 @@ def _top_transactions(
     )[:limit]
 
 
+# Recurring-charge detection deliberately excludes income and pure transfer/fixed-obligation
+# categories — those repeat by nature (rent, mortgage, LOC payments) and flagging them as
+# "subscriptions to review" would be noise, not insight.
+_NON_DISCRETIONARY_RECURRING_CATEGORIES = {
+    'salary', 'income', 'interest_income', 'refunds',
+    'credit_card_payments', 'line_of_credit_payments', 'bank_transfers',
+    'internal_transfers', 'interac_e_transfers', 'investments',
+    'mortgage_payments', 'car_payments', 'rent',
+}
+
+_TIMEFRAME_DAYS = {'day': 1, 'week': 7, 'month': 30, 'year': 365}
+# Matches free text like "save $10000 in 3 months" / "save 500 dollars within 2 weeks" /
+# "put aside 1,200 by the next 6 weeks". Amount must come before the timeframe — good enough for
+# the app's own suggested prompts and typical phrasing without over-engineering an NLP parser (a
+# connected cloud provider handles genuinely free-form phrasing; this is the local-rules fallback).
+_SAVINGS_TARGET_RE = re.compile(
+    r'\$?\s?([\d][\d,]*(?:\.\d+)?)\s*(?:dollars?|cad|bucks?)?\s*'
+    r'(?:in|within|over|by)\s*(?:the\s*next\s*)?(\d+)\s*(day|week|month|year)s?',
+    re.IGNORECASE,
+)
+
+
+def _needs_vs_wants_breakdown(
+    categories: dict[str, float]
+) -> tuple[float, float, float, list[tuple[str, float]]]:
+    """Splits expense categories into essential / discretionary / pure-cost tiers so the advisor can
+    answer "which of my expenses are needed vs waste" with real numbers, instead of just listing
+    the biggest categories regardless of whether they're necessary."""
+    essential_total = sum(total for cat, total in categories.items() if cat in ESSENTIAL_CATEGORIES)
+    discretionary_total = sum(total for cat, total in categories.items() if cat in DISCRETIONARY_CATEGORIES)
+    pure_cost_total = sum(total for cat, total in categories.items() if cat in PURE_COST_CATEGORIES)
+    top_discretionary = sorted(
+        ((cat, total) for cat, total in categories.items() if cat in DISCRETIONARY_CATEGORIES and total > 0),
+        key=lambda pair: pair[1],
+        reverse=True,
+    )
+    return essential_total, discretionary_total, pure_cost_total, top_discretionary
+
+
+def _detect_recurring_charges(
+    transactions: list[TransactionInput], *, limit: int = 5
+) -> list[tuple[str, int, float, float, str]]:
+    """Groups transactions by merchant to find real recurring charges (2+ occurrences at a
+    consistent amount). This app's categorization has no dedicated "subscription" category — a
+    $9.99 streaming charge could land in shopping, lifestyle, or bill_payments depending on the
+    description — so detecting by merchant + amount consistency is far more reliable than guessing
+    from category alone. Returns (display_name, occurrence_count, avg_amount, total_amount, category),
+    sorted by occurrence count then total spend, descending."""
+    groups: dict[str, list[TransactionInput]] = defaultdict(list)
+    for transaction in transactions:
+        if transaction.is_internal_transfer:
+            continue
+        if transaction.category in _NON_DISCRETIONARY_RECURRING_CATEGORIES:
+            continue
+        key = (transaction.merchant_normalized or transaction.description_raw).strip().lower()
+        if not key:
+            continue
+        groups[key].append(transaction)
+
+    recurring: list[tuple[str, int, float, float, str]] = []
+    for items in groups.values():
+        if len(items) < 2:
+            continue
+        amounts = [abs(item.amount) for item in items]
+        spread = max(amounts) - min(amounts)
+        tolerance = max(min(amounts) * 0.15, 2.0)  # allow small drift (tax/tips), not unrelated charges
+        if spread > tolerance:
+            continue
+        display_name = max((item.description_raw for item in items), key=len)
+        category = max(
+            {item.category for item in items},
+            key=lambda cat: sum(1 for item in items if item.category == cat),
+        )
+        recurring.append((display_name, len(items), sum(amounts) / len(amounts), sum(amounts), category))
+
+    recurring.sort(key=lambda entry: (entry[1], entry[3]), reverse=True)
+    return recurring[:limit]
+
+
+def _parse_savings_target_from_question(question: str) -> Optional[tuple[float, int]]:
+    """Parses free text like "how can I save $10000 in 3 months" into (amount, days). Returns None
+    if no specific target is found, in which case the advisor falls back to general analysis."""
+    match = _SAVINGS_TARGET_RE.search(question)
+    if not match:
+        return None
+    amount = float(match.group(1).replace(',', ''))
+    count = int(match.group(2))
+    unit = match.group(3).lower()
+    days = count * _TIMEFRAME_DAYS[unit]
+    if amount <= 0 or days <= 0:
+        return None
+    return amount, days
+
+
+def _feasibility_for_free_text_goal(request: AdvisorRequest, amount: float, days: int, cut_savings: float) -> str:
+    """Answers a specific "can I save $X in Y days" question directly, reusing the same
+    achievable-alternative math as formal goal forecasting (_estimate_goal_forecasts) via a
+    synthetic one-off GoalInput — single source of truth for the feasibility calculation instead of
+    a second, divergent implementation."""
+    synthetic_goal = GoalInput(
+        id='__adhoc__',
+        name='this goal',
+        target_amount=amount,
+        current_amount=0.0,
+        deadline=(date.today() + timedelta(days=days)).isoformat(),
+        monthly_contribution_target=0.0,
+    )
+    avg_monthly_net = _avg_monthly_net(request)
+    forecast = _estimate_goal_forecasts([synthetic_goal], cut_savings, avg_monthly_net)[0]
+    return f"Saving ${amount:.0f} in {days} days needs ${forecast.required_monthly_savings:.0f}/month. {forecast.message}"
+
+
+def _build_needs_vs_wants_insight(
+    transactions: list[TransactionInput],
+    essential_total: float,
+    discretionary_total: float,
+    top_discretionary: list[tuple[str, float]],
+) -> Optional[AdvisorInsight]:
+    if essential_total <= 0 and discretionary_total <= 0:
+        return None
+    if top_discretionary:
+        worst_category, worst_total = top_discretionary[0]
+        examples = _top_transactions(transactions, categories={worst_category}, limit=3)
+        supporting = (
+            'Largest transactions in that category: '
+            + ', '.join(f'{t.description_raw} (${abs(t.amount):.0f})' for t in examples)
+            if examples
+            else 'No individual transactions available to break this down further.'
+        )
+        detail = (
+            f'${essential_total:.0f} of tracked expenses looks essential (groceries, housing, utilities, '
+            f'insurance, debt payments). ${discretionary_total:.0f} looks discretionary \u2014 the single '
+            f'biggest discretionary category is {worst_category.replace("_", " ")} at ${worst_total:.0f}.'
+        )
+    else:
+        supporting = 'Essential categories (groceries, housing, utilities, insurance, debt payments) make up tracked expenses.'
+        detail = (
+            f'${essential_total:.0f} of tracked expenses looks essential. No clearly discretionary '
+            f'category spend was detected in the current data.'
+        )
+    return AdvisorInsight(title='Needed vs. waste breakdown', detail=detail, supporting_data=supporting)
+
+
+def _build_recurring_insight(recurring: list[tuple[str, int, float, float, str]]) -> Optional[AdvisorInsight]:
+    if not recurring:
+        return None
+    return AdvisorInsight(
+        title='Recurring charges detected',
+        detail=(
+            f'{len(recurring)} merchant(s) charge you repeatedly at a consistent amount \u2014 '
+            f'review these for subscriptions you no longer use.'
+        ),
+        supporting_data=', '.join(
+            f'{name} (\u00d7{count}, ~${avg:.2f} each, {category.replace("_", " ")})'
+            for name, count, avg, _, category in recurring
+        ),
+    )
+
+
+def _build_month_over_month_insight(monthly_trend: list[MonthlyTrendPoint]) -> Optional[AdvisorInsight]:
+    if len(monthly_trend) < 2:
+        return None
+    current, previous = monthly_trend[-1], monthly_trend[-2]
+    expense_delta = current.expenses - previous.expenses
+    income_delta = current.income - previous.income
+    direction = 'up' if expense_delta > 0 else 'down' if expense_delta < 0 else 'flat'
+    detail = (
+        f'Expenses in {current.label} were {direction} ${abs(expense_delta):.0f} vs {previous.label} '
+        f'(${previous.expenses:.0f} \u2192 ${current.expenses:.0f}). Income moved ${income_delta:+.0f} over '
+        f'the same period, for a net cash flow change of ${current.net_cash_flow - previous.net_cash_flow:+.0f}.'
+    )
+    return AdvisorInsight(
+        title=f'{current.label} vs {previous.label}',
+        detail=detail,
+        supporting_data=(
+            f'{current.label} net: ${current.net_cash_flow:.0f} CAD. {previous.label} net: '
+            f'${previous.net_cash_flow:.0f} CAD.'
+        ),
+    )
+
+
 def _advisor_from_rules(request: AdvisorRequest) -> AdvisorResponse:
-    insights: list[AdvisorInsight] = []
     transactions = request.transactions
     categories = {category.category: category.total for category in request.dashboard.top_expense_categories}
+    kpis = request.dashboard.kpis
+    question_lower = request.question.lower()
 
-    restaurant_total = categories.get('restaurants', 0)
-    shopping_total = categories.get('shopping', 0)
+    # A specific, parseable "save $X in Y days/weeks/months" question gets a direct numeric answer
+    # instead of the general breakdown below — this is one of the app's own suggested prompts.
+    parsed_target = _parse_savings_target_from_question(request.question)
+    if parsed_target is not None:
+        amount, days = parsed_target
+        cut_savings = _savings_plan_from_rules(request).total_monthly_savings
+        answer = _feasibility_for_free_text_goal(request, amount, days, cut_savings)
+        return AdvisorResponse(
+            provider=request.provider,
+            answer=answer,
+            insights=[
+                AdvisorInsight(
+                    title=f'Feasibility of saving ${amount:.0f} in {days} days',
+                    detail=answer,
+                    supporting_data=(
+                        f'Based on average net cash flow of ${_avg_monthly_net(request):.0f}/month plus '
+                        f'${cut_savings:.0f}/month in identified potential cuts.'
+                    ),
+                )
+            ],
+        )
+
+    essential_total, discretionary_total, _pure_cost_total, top_discretionary = _needs_vs_wants_breakdown(categories)
+    recurring = _detect_recurring_charges(transactions)
     fee_total = categories.get('fees', 0)
-    subscriptions = _top_transactions(transactions, categories={'bill_payments', 'utilities'}, limit=2)
 
-    if restaurant_total > 0:
-        insights.append(
-            AdvisorInsight(
-                title='Restaurant spend stands out',
-                detail=f'Restaurant spend is {restaurant_total:.0f} CAD in the current dataset.',
-                supporting_data='Top driver: '
-                + ', '.join(transaction.description_raw for transaction in _top_transactions(transactions, categories={'restaurants'})),
-            )
+    needs_vs_wants_insight = _build_needs_vs_wants_insight(transactions, essential_total, discretionary_total, top_discretionary)
+    recurring_insight = _build_recurring_insight(recurring)
+    fees_insight = (
+        AdvisorInsight(
+            title='Fees are reducing cash flow',
+            detail=f'Fees and service charges total {fee_total:.0f} CAD.',
+            supporting_data='Review bank fee patterns and interest charges in the dashboard.',
         )
+        if fee_total > 0
+        else None
+    )
+    month_over_month_insight = _build_month_over_month_insight(request.dashboard.monthly_trend)
 
-    if shopping_total > 0:
-        insights.append(
-            AdvisorInsight(
-                title='Shopping has room to trim',
-                detail=f'Shopping spend totals {shopping_total:.0f} CAD.',
-                supporting_data='Largest shopping transactions: '
-                + ', '.join(transaction.description_raw for transaction in _top_transactions(transactions, categories={'shopping'})),
-            )
-        )
+    wants_interest = any(word in question_lower for word in ('interest', 'debt'))
+    wants_change = any(word in question_lower for word in ('chang', 'compared', 'last month', 'vs last'))
+    wants_subscriptions = any(word in question_lower for word in ('subscription', 'recurring', 'cancel'))
+    wants_investing = any(word in question_lower for word in ('invest', 'stocks', 'etf'))
 
-    if fee_total > 0:
-        insights.append(
-            AdvisorInsight(
-                title='Fees are reducing cash flow',
-                detail=f'Fees and service charges total {fee_total:.0f} CAD.',
-                supporting_data='Review bank fee patterns and interest charges in the dashboard.',
-            )
+    insights: list[AdvisorInsight] = []
+    if wants_interest:
+        detail = (
+            f"You've paid ${kpis.interest_paid:.0f} in interest charges, and debt payments total "
+            f"${kpis.debt_payments:.0f} ({kpis.debt_payments / max(kpis.income, 1) * 100:.0f}% of income)."
         )
+        answer = detail + (
+            ' Every dollar of interest is money that never reaches your goals \u2014 paying down the '
+            'highest-interest balance first saves the most over time.'
+            if kpis.interest_paid > 0
+            else ' No interest charges were detected in the current data \u2014 good sign.'
+        )
+        insights.append(
+            AdvisorInsight(title='Interest & debt summary', detail=detail, supporting_data=f'Net cash flow: ${kpis.net_cash_flow:.0f} CAD.')
+        )
+    elif wants_change:
+        if month_over_month_insight is not None:
+            answer = month_over_month_insight.detail
+            insights.append(month_over_month_insight)
+        else:
+            answer = (
+                'Not enough monthly history to compare yet \u2014 at least two months of imported data '
+                'are needed to show what changed month over month.'
+            )
+    elif wants_subscriptions:
+        if recurring_insight is not None:
+            answer = recurring_insight.detail
+            insights.append(recurring_insight)
+        else:
+            answer = (
+                'No repeating charges at a consistent amount were detected in the current transaction '
+                'history \u2014 import more months of data for a stronger signal, or check the Transactions '
+                'page for merchants you recognise as subscriptions.'
+            )
+    elif wants_investing:
+        num_months = max(len(request.dashboard.monthly_trend), 1)
+        avg_monthly_income = kpis.income / num_months
+        debt_pct = kpis.debt_payments / max(kpis.income, 1) * 100
+        guidance = _investment_guidance_insight(request, debt_pct, kpis.interest_paid, avg_monthly_income, kpis.savings_rate, num_months)
+        if guidance is not None:
+            answer = guidance.recommendation
+            insights.append(AdvisorInsight(title=guidance.title, detail=guidance.recommendation, supporting_data=guidance.metric))
+        else:
+            answer = (
+                "It's early to focus on investing \u2014 build up savings rate and pay down debt first, and "
+                "this advisor will flag when the fundamentals are in place."
+            )
+    else:
+        # Default / "where am I overspending" style questions: the core needs-vs-waste answer.
+        if needs_vs_wants_insight is not None:
+            answer = needs_vs_wants_insight.detail
+            insights.append(needs_vs_wants_insight)
+        else:
+            answer = (
+                f"Net cash flow is {kpis.net_cash_flow:.0f} CAD with a savings rate of {kpis.savings_rate:.1f}%. "
+                f"No clear overspending cluster was detected from the current transaction history."
+            )
 
-    if subscriptions:
-        insights.append(
-            AdvisorInsight(
-                title='Recurring bills may be optimised',
-                detail='Recurring utility or bill transactions were detected.',
-                supporting_data='Potential recurring items: '
-                + ', '.join(transaction.description_raw for transaction in subscriptions),
-            )
-        )
+    # Always append any remaining, not-yet-included insights as supporting context.
+    already_titled = {insight.title for insight in insights}
+    for extra in (needs_vs_wants_insight, recurring_insight, fees_insight):
+        if extra is not None and extra.title not in already_titled:
+            insights.append(extra)
+            already_titled.add(extra.title)
 
     if not insights:
         insights.append(
@@ -426,14 +783,7 @@ def _advisor_from_rules(request: AdvisorRequest) -> AdvisorResponse:
             )
         )
 
-    answer = (
-        f"{request.question.strip()} Based on your current data, net cash flow is "
-        f"{request.dashboard.kpis.net_cash_flow:.0f} CAD with a savings rate of "
-        f"{request.dashboard.kpis.savings_rate:.1f}%. "
-        f"Main action areas are {', '.join(insight.title.lower() for insight in insights[:2])}."
-    )
-
-    return AdvisorResponse(provider=request.provider, answer=answer, insights=insights)
+    return AdvisorResponse(provider=request.provider, answer=answer, insights=insights[:5])
 
 
 def _avg_monthly_net(request: AdvisorRequest) -> float:
@@ -691,6 +1041,32 @@ def _categorize_with_rules(request: CategorizationRequest) -> CategorizationResp
 @app.get('/health', response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(status='ok', service='ai-service')
+
+
+class ProviderTestRequest(BaseModel):
+    provider: Literal['ollama', 'openai-compatible', 'claude']
+    model: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+
+
+class ProviderTestResponse(BaseModel):
+    success: bool
+    message: str
+    sample_reply: str | None = None
+
+
+@app.post('/provider/test', response_model=ProviderTestResponse)
+def provider_test(request: ProviderTestRequest) -> ProviderTestResponse:
+    """Verifies an AI provider is actually reachable and correctly configured, with a real error
+    message on failure — unlike the advisor/categorization endpoints, which deliberately swallow
+    every LLM failure into a silent local-rules fallback (good for uninterrupted UX, useless for
+    diagnosing a bad API key or unreachable Ollama host during setup)."""
+    try:
+        reply = providers.test_connection(request)
+        return ProviderTestResponse(success=True, message='Connected successfully.', sample_reply=reply[:200])
+    except Exception as exc:  # noqa: BLE001 - intentionally broad; message shown directly to the user
+        return ProviderTestResponse(success=False, message=str(exc))
 
 
 @app.post('/advisor/respond', response_model=AdvisorResponse)

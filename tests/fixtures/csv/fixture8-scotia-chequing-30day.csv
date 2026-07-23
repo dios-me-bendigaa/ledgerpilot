@@ -1,0 +1,23 @@
+Filter,Date,Description,Sub-description,Type of Transaction,Amount,Balance
+,2026-06-30,wal-mart supercentre,Winnipeg MB,Debit,-88.60,6078.06
+,2026-06-29,restaurant the keg,Winnipeg MB,Debit,-47.50,6166.66
+,2026-06-29,payroll deposit,Acme Corp Employer,Credit,2800.00,6214.16
+,2026-06-27,netflix.com subscription,,Debit,-16.99,3414.16
+,2026-06-25,customer transfer dr.,Mb-Credit Card/Loc Pay.,Debit,-300.00,3431.15
+,2026-06-24,real cdn superstore,Winnipeg MB,Debit,-102.15,3731.15
+,2026-06-22,petro-canada gas,Winnipeg MB,Debit,-58.00,3833.30
+,2026-06-20,customer transfer cr.,Mb-Credit Card/Loc Pay.,Credit,500.00,3891.30
+,2026-06-19,mortgage payment,#1234567,Debit,-1450.00,3391.30
+,2026-06-18,restaurant tim hortons,Winnipeg MB,Debit,-38.90,4841.30
+,2026-06-17,wawanesa insurance,home insurance,Debit,-125.00,4880.20
+,2026-06-16,real cdn superstore,Winnipeg MB,Debit,-110.75,5005.20
+,2026-06-15,payroll deposit,Acme Corp Employer,Credit,2800.00,5115.95
+,2026-06-13,shoppers drug mart,Winnipeg MB,Debit,-42.10,2315.95
+,2026-06-12,deposit,Free Interac E-Transfer,Credit,200.00,2358.05
+,2026-06-10,manitoba hydro utility,,Debit,-180.25,2158.05
+,2026-06-08,customer transfer dr.,Mb-Credit Card/Loc Pay.,Debit,-300.00,2338.30
+,2026-06-06,restaurant the keg,Winnipeg MB,Debit,-54.30,2638.30
+,2026-06-05,mortgage payment,#1234567,Debit,-1450.00,2692.60
+,2026-06-03,petro-canada gas,Winnipeg MB,Debit,-62.00,4142.60
+,2026-06-02,real cdn superstore,Winnipeg MB,Debit,-95.40,4204.60
+,2026-06-01,payroll deposit,Acme Corp Employer,Credit,2800.00,4300.00

@@ -1,0 +1,5 @@
+Date;Description;Category;Debit;Credit;Balance
+"2026-06-19";"Overdue transfer line of credit";Transfer;"0.00";"375.00";"-12038.40"
+"2026-06-15";"Interest to be paid";Bank fee;"63.40";"0.00";"-12413.40"
+"2026-06-15";"Line of credit management fees";Fees;"0.00";"0.00";"-12350.00"
+"2026-06-10";"Authorized transaction on line of credit";Transfer;"350.00";"0.00";"-12350.00"

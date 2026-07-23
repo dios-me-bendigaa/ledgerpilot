@@ -192,3 +192,137 @@ class TestLocalRulesUnchanged:
         resp = client.post("/advisor/respond", json=payload)
         assert resp.status_code == 200
         assert resp.json()["provider"] == "local-rules"
+
+
+def _mock_claude_response(text: str) -> dict:
+    return {"content": [{"type": "text", "text": text}]}
+
+
+class TestClaudeDispatch:
+    CLAUDE_PAYLOAD = {
+        **BASE_ADVISOR_PAYLOAD,
+        "provider": "claude",
+        "model": "claude-3-5-sonnet-20241022",
+        "base_url": "https://api.anthropic.com",
+        "api_key": "sk-ant-test-key",
+    }
+
+    def test_happy_path_returns_llm_answer(self):
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = _mock_claude_response(
+            json.dumps({"answer": "You are overspending on dining out.", "insights": []})
+        )
+
+        with patch("httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_resp
+            mock_client_cls.return_value = mock_client
+
+            resp = client.post("/advisor/respond", json=self.CLAUDE_PAYLOAD)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["provider"] == "claude"
+        assert "overspending" in data["answer"].lower() or len(data["answer"]) > 0
+        # Confirm the real Anthropic request shape was used (x-api-key header, /v1/messages path).
+        call_args = mock_client.post.call_args
+        assert call_args.args[0].endswith('/v1/messages')
+        assert call_args.kwargs['headers']['x-api-key'] == 'sk-ant-test-key'
+        assert call_args.kwargs['headers']['anthropic-version'] == '2023-06-01'
+
+    def test_strips_markdown_json_fence(self):
+        # Claude has no OpenAI-style JSON response_format — it commonly wraps replies in a
+        # ```json fence even when explicitly told not to. This must not be treated as a parse
+        # failure (which would silently and misleadingly fall back to local-rules).
+        fenced = "```json\n" + json.dumps({"answer": "Fenced reply works.", "insights": []}) + "\n```"
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = _mock_claude_response(fenced)
+
+        with patch("httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_resp
+            mock_client_cls.return_value = mock_client
+
+            resp = client.post("/advisor/respond", json=self.CLAUDE_PAYLOAD)
+
+        assert resp.status_code == 200
+        assert resp.json()["answer"] == "Fenced reply works."
+
+    def test_missing_api_key_falls_back_to_local_rules(self):
+        payload = {**self.CLAUDE_PAYLOAD, "api_key": None}
+        resp = client.post("/advisor/respond", json=payload)
+        assert resp.status_code == 200
+        # Falls back silently (dispatch_* broad except), same contract as ollama/openai-compatible.
+        assert resp.json()["provider"] == "claude"
+        assert len(resp.json()["answer"]) > 0
+
+    def test_llm_failure_falls_back_to_local_rules(self):
+        with patch("httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.side_effect = Exception("401 Unauthorized")
+            mock_client_cls.return_value = mock_client
+
+            resp = client.post("/advisor/respond", json=self.CLAUDE_PAYLOAD)
+
+        assert resp.status_code == 200
+        assert len(resp.json()["answer"]) > 0
+
+
+class TestProviderTestEndpoint:
+    """/provider/test intentionally does NOT fall back on failure — it exists specifically to
+    surface a real, actionable error message during AI-provider setup."""
+
+    def test_success_returns_sample_reply(self):
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = _mock_claude_response(json.dumps({"status": "ok"}))
+
+        with patch("httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_resp
+            mock_client_cls.return_value = mock_client
+
+            resp = client.post(
+                "/provider/test",
+                json={"provider": "claude", "model": "claude-3-5-sonnet-20241022", "api_key": "sk-ant-test"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert "ok" in data["sample_reply"]
+
+    def test_missing_api_key_reports_real_error_not_a_fallback(self):
+        resp = client.post("/provider/test", json={"provider": "claude", "api_key": None})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "api key" in data["message"].lower()
+
+    def test_connection_failure_reports_real_error(self):
+        with patch("httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.side_effect = Exception("Connection refused")
+            mock_client_cls.return_value = mock_client
+
+            resp = client.post(
+                "/provider/test",
+                json={"provider": "ollama", "model": "llama3.1", "base_url": "http://127.0.0.1:11434"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "connection refused" in data["message"].lower()

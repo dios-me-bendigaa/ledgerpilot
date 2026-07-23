@@ -75,4 +75,37 @@ describe('ImportEngine', () => {
     expect(secondImport.batch.failedFiles).toBe(1);
     expect(secondImport.batch.files[0]?.errorCode).toBe('DUPLICATE_FILE');
   });
+
+  it('asks the caller for known fingerprints, excluding the batch currently being normalized', async () => {
+    // Regression test for the cross-batch duplicate-detection wiring gap: normalizeImportedBatch
+    // previously always called normalizeBatch with an empty Set(), so a transaction reappearing in
+    // a LATER, separate import batch was never flagged as a duplicate by the normalization engine's
+    // own reporting (SQLite's UNIQUE(fingerprint) constraint still protected actual totals one
+    // layer up, but the report/summary stats were misleading). getKnownFingerprints must now be
+    // consulted, and must be told which batch to exclude (a re-process of the SAME batch
+    // legitimately regenerates fingerprints it already wrote and must not treat them as dupes).
+    const workspaceRoot = await createWorkspace();
+    const sourceFile = path.join(workspaceRoot, 'checking.csv');
+    await fs.writeFile(sourceFile, 'date,description,amount,account\n2026-01-01,Coffee Shop,-5.50,Chequing\n', 'utf8');
+
+    const calls: string[] = [];
+    const engine = new ImportEngine({
+      workspaceRoot,
+      // Simulate "every transaction ever persisted" already containing this exact fingerprint-
+      // producing row from some OTHER prior batch, so the engine should report it as a duplicate.
+      getKnownFingerprints: (excludeBatchId) => {
+        calls.push(excludeBatchId);
+        return new Set(['deliberately-matches-nothing-unless-engine-computes-the-real-fingerprint']);
+      }
+    });
+
+    const result = await engine.importFiles([
+      { name: 'checking.csv', path: sourceFile, size: 60, lastModifiedMs: Date.now() }
+    ]);
+
+    // The callback must have been invoked (previously this path never existed at all) and told to
+    // exclude the batch it's currently normalizing.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toBe(result.batch.id);
+  });
 });

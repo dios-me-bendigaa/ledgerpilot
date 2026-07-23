@@ -25,6 +25,17 @@ type ImportEngineOptions = {
     transactions: NormalizedTransaction[];
     history: ImportHistory;
   }) => Promise<void>;
+  // Supplies fingerprints of transactions already persisted in OTHER batches, so the
+  // normalization engine's own duplicate detection can catch a transaction reappearing across
+  // separate import batches (previously this was always an empty Set, so cross-batch duplicate
+  // *reporting* silently under-counted — SQLite's UNIQUE(fingerprint) + INSERT OR IGNORE still
+  // protected the actual persisted totals, but the app's own "duplicates found" stats were wrong).
+  // Must exclude the batch currently being (re-)normalized, since re-processing a batch will
+  // legitimately regenerate the same fingerprints it already wrote on a prior run.
+  getKnownFingerprints?: (excludeBatchId: string) => Promise<Set<string>> | Set<string>;
+  // Current home-currency setting, read fresh at normalize time (like getKnownFingerprints above)
+  // so a settings change takes effect on the next import without recreating the ImportEngine.
+  getHomeCurrency?: () => Promise<string> | string;
 };
 
 const historyFileName = 'import-history.json';
@@ -84,12 +95,16 @@ export class ImportEngine {
   private readonly normalizationEngine: NormalizationEngine;
   private readonly logger?: (message: string) => void;
   private readonly onBatchImported?: ImportEngineOptions['onBatchImported'];
+  private readonly getKnownFingerprints?: ImportEngineOptions['getKnownFingerprints'];
+  private readonly getHomeCurrency?: ImportEngineOptions['getHomeCurrency'];
 
   constructor(options: ImportEngineOptions) {
     this.workspaceRoot = options.workspaceRoot;
     this.normalizationEngine = new NormalizationEngine();
     this.logger = options.logger;
     this.onBatchImported = options.onBatchImported;
+    this.getKnownFingerprints = options.getKnownFingerprints;
+    this.getHomeCurrency = options.getHomeCurrency;
   }
 
   async getHistory(): Promise<ImportHistory> {
@@ -331,10 +346,15 @@ export class ImportEngine {
     }
 
     this.logger?.(`normalizeImportedBatch batchId=${batch.id} sources=${successfulSources.map((s) => s.fileName).join(', ')}`);
+    const knownFingerprints = this.getKnownFingerprints
+      ? await this.getKnownFingerprints(batch.id)
+      : new Set<string>();
+    const homeCurrency = this.getHomeCurrency ? await this.getHomeCurrency() : 'CAD';
     const result = await this.normalizationEngine.normalizeBatch({
       batch,
       sources: successfulSources,
-      knownFingerprints: new Set(),
+      knownFingerprints,
+      homeCurrency,
       logger: this.logger
     });
 

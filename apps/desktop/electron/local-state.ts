@@ -26,6 +26,7 @@ const defaultSettings: AppSettings = {
   providerSettings: {
     localModel: 'rule-engine',
     ollamaModel: 'llama3.1',
+    cloudModel: '',
     apiBaseUrl: 'http://127.0.0.1:11434',
     apiKeyConfigured: false
   },
@@ -33,14 +34,16 @@ const defaultSettings: AppSettings = {
   notificationsEnabled: true,
   cloudAiEnabled: false,
   telemetryEnabled: false,
-  importHistoryRetentionDays: 365
+  importHistoryRetentionDays: 365,
+  homeCurrency: 'CAD',
+  aiSetupCompleted: false
 };
 
 const settingsFileName = 'app-settings.json';
 const goalsFileName = 'goals.json';
 const backupHistoryFileName = 'backup-history.json';
 
-const readJsonFile = async <T>(filePath: string, fallback: T): Promise<T> => {
+export const readJsonFile = async <T>(filePath: string, fallback: T): Promise<T> => {
   try {
     const content = await fs.readFile(filePath, 'utf8');
     return JSON.parse(content) as T;
@@ -54,7 +57,7 @@ const readJsonFile = async <T>(filePath: string, fallback: T): Promise<T> => {
   }
 };
 
-const writeJsonFile = async (filePath: string, payload: unknown) => {
+export const writeJsonFile = async (filePath: string, payload: unknown) => {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8');
 };
@@ -102,6 +105,21 @@ const getOrCreateBackupKey = async () => {
   const generated = crypto.randomBytes(32);
   await setKeychainPassword(backupKeyAccount, generated.toString('hex'));
   return generated;
+};
+
+// Deliberately does NOT create a key if one is missing (unlike getOrCreateBackupKey, used only
+// when creating a new backup). Restoring with a freshly-generated key would always fail anyway
+// (AES-GCM's auth tag check would reject it), but with a cryptic "unable to authenticate data"
+// error instead of an explanation. This gives restore a clear, actionable error up front.
+const getBackupKeyStrict = async (): Promise<Buffer> => {
+  const existing = await getKeychainPassword(backupKeyAccount);
+  if (!existing) {
+    throw new Error(
+      'No backup encryption key found in this Mac\u2019s Keychain. Backups can only be restored ' +
+        'on the same machine (and Keychain) that created them.',
+    );
+  }
+  return Buffer.from(existing, 'hex');
 };
 
 export const loadSettings = async (workspaceRoot: string): Promise<SettingsPayload> => {
@@ -172,9 +190,22 @@ export const loadBackupHistory = async (workspaceRoot: string): Promise<BackupHi
   return readJsonFile<BackupHistory>(getBackupHistoryPath(workspaceRoot), { backups: [] });
 };
 
+// Extra workspace state the caller (main.ts) already knows how to read/write, gathered here so a
+// backup captures the *complete* local state instead of just transactions/settings/goals.
+// Previously category rules ("teach once, apply to all") and custom categories were silently
+// omitted from every backup — a restore, even once implemented, would have lost them.
+export type BackupExtraFiles = {
+  categoryRules: unknown;
+  customCategories: unknown;
+  normalizationReports: unknown;
+};
+
+const getDatabasePathFor = (workspaceRoot: string) => path.join(workspaceRoot, 'database', 'ledgerpilot.sqlite');
+
 export const createEncryptedBackup = async (
   workspaceRoot: string,
   settings: AppSettings,
+  extraFiles: BackupExtraFiles,
 ): Promise<BackupRecord> => {
   const backupRoot = settings.backupDirectory ?? path.join(workspaceRoot, 'backups');
   await fs.mkdir(backupRoot, { recursive: true });
@@ -182,7 +213,7 @@ export const createEncryptedBackup = async (
   const key = await getOrCreateBackupKey();
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  const databasePath = path.join(workspaceRoot, 'database', 'ledgerpilot.sqlite');
+  const databasePath = getDatabasePathFor(workspaceRoot);
   const settingsPath = getSettingsPath(workspaceRoot);
   const goalsPath = getGoalsPath(workspaceRoot);
 
@@ -193,7 +224,9 @@ export const createEncryptedBackup = async (
         database: (await fs.readFile(databasePath)).toString('base64'),
         settings: await readJsonFile(settingsPath, {}),
         goals: await readJsonFile(goalsPath, { goals: [] }),
-        reports: await readJsonFile(path.join(workspaceRoot, 'reports', 'index.json'), {})
+        categoryRules: extraFiles.categoryRules,
+        customCategories: extraFiles.customCategories,
+        normalizationReports: extraFiles.normalizationReports
       }
     },
     null,
@@ -231,6 +264,58 @@ export const createEncryptedBackup = async (
   await writeJsonFile(getBackupHistoryPath(workspaceRoot), { backups: [record, ...history.backups] });
   return record;
 };
+
+export type DecryptedBackupBundle = {
+  createdAt: string;
+  files: {
+    database: string;
+    settings?: unknown;
+    goals?: unknown;
+    categoryRules?: unknown;
+    customCategories?: unknown;
+    normalizationReports?: unknown;
+  };
+};
+
+// Decrypts a `.lpbak` archive and returns its parsed contents WITHOUT writing anything to disk —
+// callers (main.ts) own deciding how/where to apply each piece, since restoring the database file
+// requires closing the live better-sqlite3 connection first, which this module has no access to.
+export const decryptBackupBundle = async (archivePath: string): Promise<DecryptedBackupBundle> => {
+  const raw = JSON.parse(await fs.readFile(archivePath, 'utf8')) as {
+    iv: string;
+    authTag: string;
+    payload: string;
+  };
+
+  const key = await getBackupKeyStrict();
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(raw.iv, 'hex'));
+  decipher.setAuthTag(Buffer.from(raw.authTag, 'hex'));
+
+  let decrypted: Buffer;
+  try {
+    decrypted = Buffer.concat([decipher.update(Buffer.from(raw.payload, 'base64')), decipher.final()]);
+  } catch (error) {
+    // GCM's auth tag check fails closed on any tampering/corruption/wrong-key — translate node's
+    // low-level crypto error into something a user reading the error banner can act on.
+    throw new Error('Backup file could not be decrypted — it may be corrupted or from a different Mac/Keychain.');
+  }
+
+  return JSON.parse(decrypted.toString('utf8')) as DecryptedBackupBundle;
+};
+
+// Restores the settings.json/goals.json files this module owns. Category rules, custom
+// categories, normalization reports, and the SQLite database itself are restored by the caller
+// (main.ts), which already owns those paths and the live DB connection.
+export const restoreSettingsAndGoals = async (workspaceRoot: string, bundle: DecryptedBackupBundle) => {
+  if (bundle.files.settings !== undefined) {
+    await writeJsonFile(getSettingsPath(workspaceRoot), bundle.files.settings);
+  }
+  if (bundle.files.goals !== undefined) {
+    await writeJsonFile(getGoalsPath(workspaceRoot), bundle.files.goals);
+  }
+};
+
+export const getWorkspaceDatabasePath = getDatabasePathFor;
 
 export const exportWorkspaceData = async (
   workspaceRoot: string,

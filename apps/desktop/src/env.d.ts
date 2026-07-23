@@ -1,5 +1,6 @@
 import type {
   AdvisorResponse,
+  AppSettings,
   BackupHistory,
   BackupRecord,
   CategoryOverrideRequest,
@@ -18,7 +19,9 @@ import type {
   ResumeImportResult,
   ReviewTransaction,
   SavingsPlan,
-  SettingsPayload
+  SettingsPayload,
+  WorkspaceRegistry,
+  WorkspaceRegistryEntry
 } from '@ledgerpilot/core';
 
 declare global {
@@ -52,6 +55,7 @@ declare global {
       settings: {
         get: () => Promise<SettingsPayload>;
         save: (payload: SettingsPayload & { apiKey?: string }) => Promise<SettingsPayload>;
+        testProvider: (payload: { provider: AppSettings['aiProvider']; model?: string; baseUrl?: string; apiKey?: string }) => Promise<{ success: boolean; message: string; sampleReply?: string }>;
       };
       goals: {
         get: () => Promise<GoalsPayload>;
@@ -65,7 +69,7 @@ declare global {
       };
       categories: {
         list: () => Promise<CustomCategoriesPayload>;
-        add: (category: { name: string; bucket: 'income' | 'expense' | 'transfer' }) => Promise<CustomCategoriesPayload>;
+        add: (category: { name: string; bucket: 'income' | 'expense' | 'transfer'; nettingEnabled?: boolean }) => Promise<CustomCategoriesPayload>;
       };
       advisor: {
         ask: (question: string) => Promise<AdvisorResponse>;
@@ -74,12 +78,22 @@ declare global {
       backup: {
         create: () => Promise<BackupRecord>;
         history: () => Promise<BackupHistory>;
+        restore: (backupId: string) => Promise<void>;
       };
       exportData: {
         generate: () => Promise<ExportPayload>;
       };
       workspace: {
         clear: () => Promise<void>;
+        list: () => Promise<WorkspaceRegistry>;
+        create: (name: string) => Promise<WorkspaceRegistryEntry>;
+        select: (workspaceId: string) => Promise<void>;
+      };
+      menuEvents: {
+        onNavigate: (callback: (view: string) => void) => () => void;
+        onFilesSelected: (callback: (files: ImportFileDescriptor[]) => void) => () => void;
+        onRequestExport: (callback: () => void) => () => void;
+        onRequestBackup: (callback: () => void) => () => void;
       };
     };
   }
