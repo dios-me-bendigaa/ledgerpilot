@@ -4,7 +4,7 @@ Local-first, AI-assisted personal finance desktop app for macOS. Raw financial d
 on-device by default. This file tracks **what works today** vs **the desired end state** for the
 final version. Update it as functionality lands.
 
-_Last updated: 2026-07-22 · Version: 3.0.0_
+_Last updated: 2026-07-24 · Version: 3.1.0_
 
 ---
 
@@ -24,8 +24,8 @@ _Last updated: 2026-07-22 · Version: 3.0.0_
   Switch, Skeleton, EmptyState, Toast — consistent look across every page.
 - Native macOS application menu: custom About panel, Preferences, File (Import/Export/Backup),
   Edit, View (page shortcuts), Window, Help.
-- Mandatory first-run AI provider setup (Claude / OpenAI-compatible / Ollama) with a live
-  connection test — local-rules alone does not satisfy setup.
+- App-level first-run analysis setup shown before workspace selection: Local Rules can continue
+  fully offline, while Claude, OpenAI-compatible, and Ollama require a live connection test.
 
 ### Import
 - CSV import via file picker and drag-and-drop, up to 10 files per batch.

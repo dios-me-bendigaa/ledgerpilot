@@ -24,7 +24,15 @@ const pages = {
 } as const;
 
 export const AppShell = () => {
-  const { activeView, fatalError, isLoadingWorkspaces, activeWorkspaceId, isLoadingWorkspace, settings } = useWorkspace();
+  const {
+    activeView,
+    fatalError,
+    appSettings,
+    isLoadingAppSettings,
+    isLoadingWorkspaces,
+    activeWorkspaceId,
+    isLoadingWorkspace
+  } = useWorkspace();
 
   if (fatalError) {
     return (
@@ -45,10 +53,7 @@ export const AppShell = () => {
     );
   }
 
-  // The workspace list itself is still loading — distinct from isLoadingWorkspace below, which
-  // only starts once a specific workspace has been selected. No sidebar yet: we don't know which
-  // workspace's data (or even whether AI setup is complete) applies until one is chosen.
-  if (isLoadingWorkspaces) {
+  if (isLoadingAppSettings || isLoadingWorkspaces) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6">
         <div className="w-full max-w-xl space-y-4">
@@ -59,8 +64,13 @@ export const AppShell = () => {
     );
   }
 
-  // Never auto-resumes the last-used workspace — always shown until the user explicitly picks or
-  // creates one, every single launch.
+  // Provider selection is app-level and always precedes access to financial workspaces.
+  if (!appSettings.aiSetupCompleted) {
+    return <AiSetupScreen />;
+  }
+
+  // Never auto-resume a financial workspace. The user explicitly opens an existing workspace or
+  // creates a clean one after the provider decision is complete.
   if (!activeWorkspaceId) {
     return <WorkspacePickerScreen />;
   }
@@ -87,10 +97,6 @@ export const AppShell = () => {
   }
 
   const ActivePage = pages[activeView];
-
-  if (!settings.aiSetupCompleted) {
-    return <AiSetupScreen />;
-  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-100">

@@ -60,6 +60,9 @@ const dashboard = {
 };
 
 const settings = {
+  getGlobal: () => ipcRenderer.invoke('settings:get-global') as Promise<SettingsPayload>,
+  saveGlobal: (payload: SettingsPayload & { apiKey?: string }) =>
+    ipcRenderer.invoke('settings:save-global', payload) as Promise<SettingsPayload>,
   get: () => ipcRenderer.invoke('settings:get') as Promise<SettingsPayload>,
   save: (payload: SettingsPayload & { apiKey?: string }) =>
     ipcRenderer.invoke('settings:save', payload) as Promise<SettingsPayload>,

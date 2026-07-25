@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { Bot, CheckCircle2, Sparkles, XCircle } from 'lucide-react';
 
-import type { AiProvider } from '@ledgerpilot/core';
+import type { AiProvider, AppSettings } from '@ledgerpilot/core';
 import { Button, Card, Input } from '@ledgerpilot/ui';
 
 import { useWorkspace } from '../context/WorkspaceContext';
+import { providerRequiresConnectionTest } from '../lib/startup';
 
 type ProviderOption = {
-  id: Exclude<AiProvider, 'local-rules'>;
+  id: AiProvider;
   label: string;
   description: string;
   needsApiKey: boolean;
@@ -18,47 +19,71 @@ type ProviderOption = {
 
 const providerOptions: ProviderOption[] = [
   {
-    id: 'claude',
-    label: 'Claude (Anthropic)',
-    description: 'Cloud. Requires an Anthropic API key.',
-    needsApiKey: true,
+    id: 'local-rules',
+    label: 'Local rules',
+    description: 'Private and offline. Uses LedgerPilot’s built-in finance rules without an AI model or API key.',
+    needsApiKey: false,
     needsBaseUrl: false,
-    defaultModel: 'claude-3-5-sonnet-20241022'
-  },
-  {
-    id: 'openai-compatible',
-    label: 'OpenAI-compatible',
-    description: 'Cloud. OpenAI, or any OpenAI-compatible endpoint (Azure, GitHub Models, local proxies, etc.).',
-    needsApiKey: true,
-    needsBaseUrl: true,
-    defaultModel: 'gpt-4o-mini',
-    defaultBaseUrl: 'https://api.openai.com'
+    defaultModel: 'rule-engine'
   },
   {
     id: 'ollama',
-    label: 'Ollama',
-    description: 'Runs fully on this Mac — no subscription, no data leaves your machine. Requires Ollama installed and running.',
+    label: 'Local LLM (Ollama)',
+    description: 'Uses a model running on this Mac. Requires Ollama and the selected model to be installed.',
     needsApiKey: false,
     needsBaseUrl: true,
     defaultModel: 'llama3.1',
     defaultBaseUrl: 'http://127.0.0.1:11434'
+  },
+  {
+    id: 'openai-compatible',
+    label: 'OpenAI or compatible API',
+    description: 'Uses an OpenAI API key or a compatible chat-completions endpoint. ChatGPT subscriptions do not include API usage.',
+    needsApiKey: true,
+    needsBaseUrl: true,
+    defaultModel: 'gpt-5-mini',
+    defaultBaseUrl: 'https://api.openai.com'
+  },
+  {
+    id: 'claude',
+    label: 'Claude (Anthropic API)',
+    description: 'Uses an Anthropic API key. A Claude consumer subscription does not include API usage.',
+    needsApiKey: true,
+    needsBaseUrl: true,
+    defaultModel: 'claude-sonnet-4-20250514',
+    defaultBaseUrl: 'https://api.anthropic.com'
   }
 ];
 
-// Shown once, blocking, before the main app is reachable — LedgerPilot requires a real,
-// verified AI backend (Claude, an OpenAI-compatible endpoint, or a local Ollama install) rather
-// than silently defaulting to the free rule-based engine. This is a deliberate product decision:
-// the app is positioned as AI-powered, and the setup step makes sure that's actually true for
-// every install rather than something a user might never notice they hadn't configured.
+const optionFor = (provider: AiProvider) =>
+  providerOptions.find((option) => option.id === provider) ?? providerOptions[0] as ProviderOption;
+
+const modelFor = (settings: AppSettings, option: ProviderOption) => {
+  if (option.id === 'local-rules') return settings.providerSettings.localModel || option.defaultModel;
+  if (option.id === 'ollama') return settings.providerSettings.ollamaModel || option.defaultModel;
+  return settings.providerSettings.cloudModel || option.defaultModel;
+};
+
 export const AiSetupScreen = () => {
-  const { settings, setSettings, handleSaveSettings } = useWorkspace();
-  const [selected, setSelected] = useState<ProviderOption>(providerOptions[0] as ProviderOption);
-  const [model, setModel] = useState(selected.defaultModel);
-  const [baseUrl, setBaseUrl] = useState(selected.defaultBaseUrl ?? '');
+  const { appSettings, handleCompleteAiSetup } = useWorkspace();
+  const initialOption = optionFor(appSettings.aiProvider);
+  const [selected, setSelected] = useState<ProviderOption>(initialOption);
+  const [model, setModel] = useState(modelFor(appSettings, initialOption));
+  const [baseUrl, setBaseUrl] = useState(appSettings.providerSettings.apiBaseUrl || initialOption.defaultBaseUrl || '');
   const [apiKey, setApiKey] = useState('');
   const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | undefined>();
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string }>();
   const [isSaving, setIsSaving] = useState(false);
+
+  const requiresConnectionTest = providerRequiresConnectionTest(selected.id);
+  const canTest =
+    !isTesting &&
+    model.trim().length > 0 &&
+    (!selected.needsBaseUrl || baseUrl.trim().length > 0) &&
+    (!selected.needsApiKey || apiKey.trim().length > 0);
+  const canContinue = selected.id === 'local-rules' || testResult?.success === true;
+
+  const invalidateTest = () => setTestResult(undefined);
 
   const selectProvider = (option: ProviderOption) => {
     setSelected(option);
@@ -69,14 +94,15 @@ export const AiSetupScreen = () => {
   };
 
   const runTest = async () => {
+    if (!canTest) return;
     setIsTesting(true);
     setTestResult(undefined);
     try {
       const result = await window.ledgerPilot.settings.testProvider({
         provider: selected.id,
-        model,
-        baseUrl,
-        apiKey
+        model: model.trim(),
+        baseUrl: baseUrl.trim(),
+        apiKey: apiKey.trim() || undefined
       });
       setTestResult({ success: result.success, message: result.message });
     } catch (error) {
@@ -86,43 +112,29 @@ export const AiSetupScreen = () => {
     }
   };
 
-  const canContinue = testResult?.success === true;
-
   const finishSetup = async () => {
     if (!canContinue) return;
     setIsSaving(true);
     try {
-      setSettings({
-        ...settings,
+      const nextSettings: AppSettings = {
+        ...appSettings,
         aiProvider: selected.id,
         providerSettings: {
-          ...settings.providerSettings,
-          ollamaModel: selected.id === 'ollama' ? model : settings.providerSettings.ollamaModel,
-          cloudModel: selected.id !== 'ollama' ? model : settings.providerSettings.cloudModel,
-          apiBaseUrl: baseUrl || undefined
+          ...appSettings.providerSettings,
+          localModel: selected.id === 'local-rules' ? model.trim() || 'rule-engine' : appSettings.providerSettings.localModel,
+          ollamaModel: selected.id === 'ollama' ? model.trim() : appSettings.providerSettings.ollamaModel,
+          cloudModel:
+            selected.id === 'openai-compatible' || selected.id === 'claude'
+              ? model.trim()
+              : appSettings.providerSettings.cloudModel,
+          apiBaseUrl: selected.needsBaseUrl ? baseUrl.trim() : undefined
         },
-        cloudAiEnabled: selected.id !== 'ollama',
+        cloudAiEnabled: selected.id === 'openai-compatible' || selected.id === 'claude',
         aiSetupCompleted: true
-      });
-      // handleSaveSettings reads from `settings` state, which won't have flushed yet from the
-      // setSettings call above in this same tick — save explicitly with the values we just chose.
-      await window.ledgerPilot.settings.save({
-        settings: {
-          ...settings,
-          aiProvider: selected.id,
-          providerSettings: {
-            ...settings.providerSettings,
-            ollamaModel: selected.id === 'ollama' ? model : settings.providerSettings.ollamaModel,
-            cloudModel: selected.id !== 'ollama' ? model : settings.providerSettings.cloudModel,
-            apiBaseUrl: baseUrl || undefined
-          },
-          cloudAiEnabled: selected.id !== 'ollama',
-          aiSetupCompleted: true
-        },
-        apiKey: apiKey || undefined
-      });
-      await window.ledgerPilot.imports.history(); // cheap no-op call to confirm IPC is alive before reload
-      window.location.reload();
+      };
+      await handleCompleteAiSetup(nextSettings, apiKey);
+    } catch (error) {
+      setTestResult({ success: false, message: error instanceof Error ? error.message : 'Could not save AI settings.' });
     } finally {
       setIsSaving(false);
     }
@@ -137,49 +149,75 @@ export const AiSetupScreen = () => {
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-sky-400">Welcome to LedgerPilot</p>
-            <h1 className="text-2xl font-semibold text-white">Connect an AI provider to continue</h1>
+            <h1 className="text-2xl font-semibold text-white">Choose how LedgerPilot analyzes your data</h1>
           </div>
         </div>
         <p className="mt-4 text-sm leading-6 text-slate-400">
-          LedgerPilot is an AI-powered finance copilot — categorization, the advisor, and savings planning all run
-          through a real model. Choose a provider and verify the connection before continuing.
+          Start fully offline with built-in rules, connect a model running on this Mac, or use a cloud API.
+          You’ll choose or create a financial workspace next.
         </p>
 
-        <div className="mt-6 grid gap-3">
+        <div className="mt-6 grid gap-3 sm:grid-cols-2">
           {providerOptions.map((option) => (
             <button
               key={option.id}
+              type="button"
               onClick={() => selectProvider(option)}
               className={[
                 'rounded-2xl border p-4 text-left transition-colors',
-                selected.id === option.id ? 'border-sky-400/50 bg-sky-400/5' : 'border-white/5 bg-slate-950/60 hover:border-white/15'
+                selected.id === option.id
+                  ? 'border-sky-400/50 bg-sky-400/5'
+                  : 'border-white/5 bg-slate-950/60 hover:border-white/15'
               ].join(' ')}
             >
               <div className="flex items-center justify-between">
                 <p className="font-medium text-slate-100">{option.label}</p>
                 {selected.id === option.id ? <CheckCircle2 className="h-4 w-4 text-sky-400" /> : null}
               </div>
-              <p className="mt-1 text-xs text-slate-500">{option.description}</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">{option.description}</p>
             </button>
           ))}
         </div>
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <Input label="Model" value={model} onChange={(event) => setModel(event.target.value)} />
-          {selected.needsBaseUrl ? (
-            <Input label="Base URL" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
-          ) : null}
-          {selected.needsApiKey ? (
+        {selected.id === 'local-rules' ? (
+          <div className="mt-6 rounded-2xl bg-emerald-500/10 p-4 text-sm text-emerald-200">
+            No connection test is needed. Your imported financial data stays on this Mac.
+          </div>
+        ) : (
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <Input
-              label="API key"
-              type="password"
-              containerClassName="sm:col-span-2"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder={`Paste your ${selected.label} API key`}
+              label="Model name"
+              value={model}
+              onChange={(event) => {
+                setModel(event.target.value);
+                invalidateTest();
+              }}
             />
-          ) : null}
-        </div>
+            {selected.needsBaseUrl ? (
+              <Input
+                label="Base URL"
+                value={baseUrl}
+                onChange={(event) => {
+                  setBaseUrl(event.target.value);
+                  invalidateTest();
+                }}
+              />
+            ) : null}
+            {selected.needsApiKey ? (
+              <Input
+                label="API key"
+                type="password"
+                containerClassName="sm:col-span-2"
+                value={apiKey}
+                onChange={(event) => {
+                  setApiKey(event.target.value);
+                  invalidateTest();
+                }}
+                placeholder={`Paste your ${selected.label} key`}
+              />
+            ) : null}
+          </div>
+        )}
 
         {testResult ? (
           <div
@@ -188,26 +226,27 @@ export const AiSetupScreen = () => {
               testResult.success ? 'bg-emerald-500/10 text-emerald-200' : 'bg-rose-500/10 text-rose-200'
             ].join(' ')}
           >
-            {testResult.success ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}
+            {testResult.success ? (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : (
+              <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            )}
             <span>{testResult.message}</span>
           </div>
         ) : null}
 
-        <div className="mt-6 flex items-center gap-3">
-          <Button
-            variant="secondary"
-            disabled={isTesting || (selected.needsApiKey && !apiKey.trim())}
-            onClick={() => void runTest()}
-            icon={<Bot />}
-          >
-            {isTesting ? 'Testing…' : 'Test connection'}
-          </Button>
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          {requiresConnectionTest ? (
+            <Button variant="secondary" disabled={!canTest} onClick={() => void runTest()} icon={<Bot />}>
+              {isTesting ? 'Testing…' : 'Test connection'}
+            </Button>
+          ) : null}
           <Button disabled={!canContinue || isSaving} onClick={() => void finishSetup()}>
-            {isSaving ? 'Saving…' : 'Continue to LedgerPilot'}
+            {isSaving ? 'Saving…' : selected.id === 'local-rules' ? 'Continue with Local Rules' : 'Continue to workspaces'}
           </Button>
         </div>
-        <p className="mt-4 text-xs text-slate-600">
-          You can change providers any time from Settings. Your API key is stored in macOS Keychain, never in plain text.
+        <p className="mt-4 text-xs leading-5 text-slate-600">
+          API keys are stored in macOS Keychain, never in workspace files. Provider settings can be changed later.
         </p>
       </Card>
     </div>

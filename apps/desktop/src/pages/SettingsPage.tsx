@@ -29,6 +29,25 @@ export const SettingsPage = () => {
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | undefined>();
 
+  const selectProvider = (provider: AppSettings['aiProvider']) => {
+    const providerSettings =
+      provider === 'ollama'
+        ? { ...settings.providerSettings, ollamaModel: 'llama3.1', apiBaseUrl: 'http://127.0.0.1:11434' }
+        : provider === 'openai-compatible'
+          ? { ...settings.providerSettings, cloudModel: 'gpt-5-mini', apiBaseUrl: 'https://api.openai.com' }
+          : provider === 'claude'
+            ? { ...settings.providerSettings, cloudModel: 'claude-sonnet-4-20250514', apiBaseUrl: 'https://api.anthropic.com' }
+            : { ...settings.providerSettings, localModel: 'rule-engine', apiBaseUrl: undefined };
+    setSettings({
+      ...settings,
+      aiProvider: provider,
+      providerSettings,
+      cloudAiEnabled: provider === 'openai-compatible' || provider === 'claude'
+    });
+    setApiKeyInput('');
+    setTestResult(undefined);
+  };
+
   const runTest = async () => {
     setIsTesting(true);
     setTestResult(undefined);
@@ -63,10 +82,7 @@ export const SettingsPage = () => {
             <Select
               label="AI provider"
               value={settings.aiProvider}
-              onChange={(event) => {
-                setSettings({ ...settings, aiProvider: event.target.value as AppSettings['aiProvider'] });
-                setTestResult(undefined);
-              }}
+              onChange={(event) => selectProvider(event.target.value as AppSettings['aiProvider'])}
             >
               <option value="local-rules">Local rules (fully private, no AI model)</option>
               <option value="claude">Claude (Anthropic)</option>
@@ -100,7 +116,7 @@ export const SettingsPage = () => {
                 />
                 {settings.aiProvider === 'ollama' || settings.aiProvider === 'openai-compatible' ? (
                   <Input
-                    label="Base URL"
+                    label="Base URL or chat-completions endpoint"
                     value={settings.providerSettings.apiBaseUrl ?? ''}
                     onChange={(event) => setSettings({ ...settings, providerSettings: { ...settings.providerSettings, apiBaseUrl: event.target.value } })}
                   />

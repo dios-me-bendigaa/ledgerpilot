@@ -6,10 +6,9 @@ import { Button, Card, EmptyState, Input } from '@ledgerpilot/ui';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { relativeTime } from '../lib/format';
 
-// Shown once per launch, before anything else (even the AI-setup gate) — workspaces are never
-// auto-resumed, by design: the user always sees and confirms which set of financial data they're
-// opening. Existing workspaces persist locally forever; there is deliberately no delete/remove
-// action here (or anywhere yet) — only creation and selection.
+// Shown after app-level AI setup. Workspaces are never auto-resumed: the user always confirms
+// which financial dataset to open. Creating a workspace routes to CSV import; opening an existing
+// one routes to its dashboard.
 export const WorkspacePickerScreen = () => {
   const { workspaces, handleSelectWorkspace, handleCreateWorkspace, isWorking } = useWorkspace();
   const [isCreating, setIsCreating] = useState(workspaces.length === 0);

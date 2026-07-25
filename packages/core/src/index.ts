@@ -459,9 +459,9 @@ export type AppSettings = {
   // in a different currency is tracked accurately as itself, and surfaced as "other currency", not
   // silently summed into the home-currency totals as if it were 1:1.
   homeCurrency: string;
-  // Set once the user has completed the mandatory first-run AI provider setup (chosen and
-  // successfully verified a real provider — local-rules alone does not satisfy this). Gates
-  // whether the blocking setup screen shows on launch.
+  // Set once the user has chosen an app-level analysis mode. Local rules is a valid completed
+  // setup because it intentionally requires no network connection; model-backed providers must
+  // pass their connection test before this becomes true.
   aiSetupCompleted: boolean;
 };
 

@@ -123,8 +123,8 @@ export const shutdownAiService = () => {
 
 const defaultModelFor = (settings: AppSettings): string => {
   if (settings.aiProvider === 'ollama') return settings.providerSettings.ollamaModel ?? 'llama3.1';
-  if (settings.aiProvider === 'claude') return settings.providerSettings.cloudModel || 'claude-3-5-sonnet-20241022';
-  if (settings.aiProvider === 'openai-compatible') return settings.providerSettings.cloudModel || 'gpt-4o-mini';
+  if (settings.aiProvider === 'claude') return settings.providerSettings.cloudModel || 'claude-sonnet-4-20250514';
+  if (settings.aiProvider === 'openai-compatible') return settings.providerSettings.cloudModel || 'gpt-5-mini';
   return 'llama3.1';
 };
 

@@ -25,8 +25,12 @@ Local-first AI-powered personal finance desktop application for macOS.
 npm install
 npm run build
 npm run test
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r apps/ai-service/requirements.txt
-pytest apps/ai-service/tests
+python3 -m venv apps/ai-service/.venv
+apps/ai-service/.venv/bin/pip install -r apps/ai-service/requirements.txt
+apps/ai-service/.venv/bin/pytest apps/ai-service/tests
+npm run dev
 ```
+
+LedgerPilot automatically uses `apps/ai-service/.venv` for the local sidecar in development.
+Choosing Local Rules needs no external model. Choosing Local LLM requires Ollama to be installed,
+running, and to have the selected model available.

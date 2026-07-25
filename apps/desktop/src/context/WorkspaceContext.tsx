@@ -21,6 +21,7 @@ import { useToast } from '@ledgerpilot/ui';
 import { createContext, useContext, useEffect, useRef, useState, type PropsWithChildren } from 'react';
 
 import type { NewGoalInput } from '../lib/format';
+import { initialViewForWorkspace } from '../lib/startup';
 
 export const emptyDashboardData: DashboardData = {
   generatedAt: '',
@@ -96,6 +97,8 @@ type WorkspaceContextValue = {
   // per-workspace data load that only starts once a workspace has actually been selected.
   workspaces: WorkspaceRegistryEntry[];
   activeWorkspaceId: string | undefined;
+  appSettings: AppSettings;
+  isLoadingAppSettings: boolean;
   isLoadingWorkspaces: boolean;
 
   // loading
@@ -147,9 +150,10 @@ type WorkspaceContextValue = {
   setNewCategoryNetting: (value: boolean) => void;
 
   // actions
-  loadWorkspaceState: () => Promise<void>;
+  loadWorkspaceState: () => Promise<TransactionSummary | undefined>;
   handleSelectWorkspace: (workspaceId: string) => Promise<void>;
   handleCreateWorkspace: (name: string) => Promise<void>;
+  handleCompleteAiSetup: (settings: AppSettings, apiKey?: string) => Promise<void>;
   setFilesWithLimitCheck: (files: ImportFileDescriptor[]) => void;
   handleSelectFiles: () => Promise<void>;
   handleImport: () => Promise<void>;
@@ -181,6 +185,8 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
   const [activeView, setActiveView] = useState<ViewKey>('overview');
   const [workspaces, setWorkspaces] = useState<WorkspaceRegistryEntry[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>();
+  const [appSettings, setAppSettings] = useState<AppSettings>(emptySettings);
+  const [isLoadingAppSettings, setIsLoadingAppSettings] = useState(true);
   const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(true);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
   const [selectedFiles, setSelectedFiles] = useState<ImportFileDescriptor[]>([]);
@@ -257,6 +263,7 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
       setCustomCategories(nextCustomCategories.categories);
       setAllTransactions(nextAllTransactions.transactions);
       setFatalError(undefined);
+      return nextTransactionSummary;
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.stack ?? nextError.message : String(nextError);
       console.error('LedgerPilot loadWorkspaceState failed', nextError);
@@ -266,29 +273,35 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
     }
   };
 
-  // Fetches the workspace list only — does NOT load per-workspace data (that only happens once a
-  // workspace is actually selected, via handleSelectWorkspace below). Runs on every launch, since
-  // the picker is deliberately never skipped in favour of auto-resuming the last workspace.
+  // App-level AI setup must resolve before the workspace picker can be shown. Workspace financial
+  // data is still loaded only after an explicit selection.
   useEffect(() => {
     (async () => {
       try {
-        setWorkspaces((await window.ledgerPilot.workspace.list()).workspaces);
+        const [nextAppSettings, nextWorkspaces] = await Promise.all([
+          window.ledgerPilot.settings.getGlobal(),
+          window.ledgerPilot.workspace.list()
+        ]);
+        setAppSettings(nextAppSettings.settings);
+        setWorkspaces(nextWorkspaces.workspaces);
       } catch (nextError) {
         const message = nextError instanceof Error ? nextError.stack ?? nextError.message : String(nextError);
-        console.error('LedgerPilot workspace.list failed', nextError);
+        console.error('LedgerPilot startup configuration failed', nextError);
         setFatalError(message);
       } finally {
+        setIsLoadingAppSettings(false);
         setIsLoadingWorkspaces(false);
       }
     })();
   }, []);
 
-  const handleSelectWorkspace = async (workspaceId: string) => {
+  const selectWorkspace = async (workspaceId: string, createdNow: boolean) => {
     setIsLoadingWorkspace(true);
     try {
       await window.ledgerPilot.workspace.select(workspaceId);
       setActiveWorkspaceId(workspaceId);
-      await loadWorkspaceState();
+      const summary = await loadWorkspaceState();
+      setActiveView(initialViewForWorkspace(createdNow, summary?.totalTransactions ?? 0));
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.stack ?? nextError.message : String(nextError);
       console.error('LedgerPilot workspace.select failed', nextError);
@@ -297,14 +310,26 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
     }
   };
 
+  const handleSelectWorkspace = async (workspaceId: string) => {
+    await selectWorkspace(workspaceId, false);
+  };
+
   const handleCreateWorkspace = async (name: string) => {
     try {
       const entry = await window.ledgerPilot.workspace.create(name);
       setWorkspaces((await window.ledgerPilot.workspace.list()).workspaces);
-      await handleSelectWorkspace(entry.id);
+      await selectWorkspace(entry.id, true);
     } catch (nextError) {
       toast.error(nextError instanceof Error ? nextError.message : 'Failed to create workspace.');
     }
+  };
+
+  const handleCompleteAiSetup = async (nextSettings: AppSettings, apiKey?: string) => {
+    const response = await window.ledgerPilot.settings.saveGlobal({
+      settings: nextSettings,
+      apiKey: apiKey?.trim() || undefined
+    });
+    setAppSettings(response.settings);
   };
 
   const mergeFiles = (incomingFiles: ImportFileDescriptor[]) => {
@@ -348,6 +373,7 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
       const result = await window.ledgerPilot.imports.start(selectedFiles);
       setSelectedFiles([]);
       await loadWorkspaceState();
+      setActiveView('overview');
       const inserted = result.normalizationReport?.summary.insertedTransactions ?? 0;
       const malformed = result.normalizationReport?.summary.malformedRowCount ?? 0;
       toast.success(
@@ -726,6 +752,8 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
     setActiveView,
     workspaces,
     activeWorkspaceId,
+    appSettings,
+    isLoadingAppSettings,
     isLoadingWorkspaces,
     isLoadingWorkspace,
     isImporting,
@@ -770,6 +798,7 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
     loadWorkspaceState,
     handleSelectWorkspace,
     handleCreateWorkspace,
+    handleCompleteAiSetup,
     setFilesWithLimitCheck,
     handleSelectFiles,
     handleImport,

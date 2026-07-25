@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.providers import _openai_chat_url
 
 client = TestClient(app)
 
@@ -192,6 +193,23 @@ class TestLocalRulesUnchanged:
         resp = client.post("/advisor/respond", json=payload)
         assert resp.status_code == 200
         assert resp.json()["provider"] == "local-rules"
+
+
+class TestOpenAiCompatibleUrls:
+    @pytest.mark.parametrize(
+        ("base_url", "expected"),
+        [
+            ("https://api.openai.com", "https://api.openai.com/v1/chat/completions"),
+            ("https://api.openai.com/v1", "https://api.openai.com/v1/chat/completions"),
+            ("https://models.github.ai/inference", "https://models.github.ai/inference/chat/completions"),
+            (
+                "http://127.0.0.1:1234/v1/chat/completions",
+                "http://127.0.0.1:1234/v1/chat/completions",
+            ),
+        ],
+    )
+    def test_normalizes_service_and_endpoint_urls(self, base_url: str, expected: str):
+        assert _openai_chat_url(base_url) == expected
 
 
 def _mock_claude_response(text: str) -> dict:

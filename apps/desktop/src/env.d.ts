@@ -53,6 +53,8 @@ declare global {
         data: () => Promise<DashboardData>;
       };
       settings: {
+        getGlobal: () => Promise<SettingsPayload>;
+        saveGlobal: (payload: SettingsPayload & { apiKey?: string }) => Promise<SettingsPayload>;
         get: () => Promise<SettingsPayload>;
         save: (payload: SettingsPayload & { apiKey?: string }) => Promise<SettingsPayload>;
         testProvider: (payload: { provider: AppSettings['aiProvider']; model?: string; baseUrl?: string; apiKey?: string }) => Promise<{ success: boolean; message: string; sampleReply?: string }>;

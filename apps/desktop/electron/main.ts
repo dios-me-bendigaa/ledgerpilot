@@ -53,6 +53,7 @@ import {
   loadSettings,
   restoreSettingsAndGoals,
   saveSettings,
+  settingsFileExists,
   upsertGoal
 } from './local-state.js';
 import { createWorkspace, getWorkspacePath, loadRegistry, migrateLegacyWorkspaceIfNeeded, touchWorkspace } from './workspace-registry.js';
@@ -86,11 +87,58 @@ let activeWorkspaceId: string | undefined;
 // needs to work before any workspace is selected, e.g. during migration or the picker itself.
 const getAppRoot = () => path.join(app.getPath('appData'), workspaceName);
 
+const mergeAiSettings = (base: AppSettings, source: AppSettings): AppSettings => ({
+  ...base,
+  aiProvider: source.aiProvider,
+  providerSettings: source.providerSettings,
+  cloudAiEnabled: source.cloudAiEnabled,
+  aiSetupCompleted: source.aiSetupCompleted
+});
+
+// AI configuration belongs to the application, not to one financial workspace. Existing v3
+// installs stored it inside each workspace, so the first global read performs a one-time,
+// non-destructive migration from the most recently opened configured workspace.
+const loadGlobalSettings = async (): Promise<SettingsPayload> => {
+  const appRoot = getAppRoot();
+  if (await settingsFileExists(appRoot)) {
+    return loadSettings(appRoot);
+  }
+
+  const registry = await loadRegistry(appRoot);
+  const candidates = [...registry.workspaces].sort((left, right) =>
+    right.lastOpenedAt.localeCompare(left.lastOpenedAt),
+  );
+  for (const workspace of candidates) {
+    const workspaceSettings = await loadSettings(getWorkspacePath(appRoot, workspace.id));
+    if (workspaceSettings.settings.aiSetupCompleted) {
+      const defaults = await loadSettings(appRoot);
+      return saveSettings(appRoot, {
+        settings: mergeAiSettings(defaults.settings, workspaceSettings.settings)
+      });
+    }
+  }
+
+  return loadSettings(appRoot);
+};
+
 const getWorkspaceRoot = () => {
   if (!activeWorkspaceId) {
     throw new Error('No workspace selected yet.');
   }
   return getWorkspacePath(getAppRoot(), activeWorkspaceId);
+};
+
+const syncGlobalAiSettingsToWorkspace = async (): Promise<SettingsPayload> => {
+  const [globalSettings, workspaceSettings] = await Promise.all([
+    loadGlobalSettings(),
+    loadSettings(getWorkspaceRoot())
+  ]);
+  if (!globalSettings.settings.aiSetupCompleted) {
+    return workspaceSettings;
+  }
+  return saveSettings(getWorkspaceRoot(), {
+    settings: mergeAiSettings(workspaceSettings.settings, globalSettings.settings)
+  });
 };
 
 const getDatabase = (): Database.Database => {
@@ -830,9 +878,16 @@ const buildExportPayload = async () => {
 };
 
 const registerIpcHandlers = () => {
-  // Workspace selection — the only handlers that work before a workspace has been chosen. Every
-  // other handler below depends on activeWorkspaceId being set (via getWorkspaceRoot/getDatabase/
-  // getImportEngine's guards), which only happens once workspace:select resolves.
+  // App-level AI setup and workspace selection are the handlers available before a financial
+  // workspace has been chosen. All financial-data handlers below remain workspace-scoped.
+  ipcMain.handle('settings:get-global', async () => {
+    return loadGlobalSettings();
+  });
+
+  ipcMain.handle('settings:save-global', async (_event, payload: SettingsPayload & { apiKey?: string }) => {
+    return saveSettings(getAppRoot(), payload);
+  });
+
   ipcMain.handle('workspace:list', async () => {
     return loadRegistry(getAppRoot()) as Promise<WorkspaceRegistry>;
   });
@@ -847,6 +902,7 @@ const registerIpcHandlers = () => {
     await ensureWorkspace();
     await initializeDatabase();
     importEngine = createImportEngine();
+    await syncGlobalAiSettingsToWorkspace();
     await touchWorkspace(getAppRoot(), workspaceId);
     void writeLog(`workspace:select ready root=${getWorkspaceRoot()}`);
   });
@@ -928,7 +984,13 @@ const registerIpcHandlers = () => {
   });
 
   ipcMain.handle('settings:save', async (_event, payload: SettingsPayload & { apiKey?: string }) => {
-    return saveSettings(getWorkspaceRoot(), payload) as Promise<SettingsPayload>;
+    const workspaceResult = await saveSettings(getWorkspaceRoot(), payload);
+    const currentGlobal = await loadGlobalSettings();
+    await saveSettings(getAppRoot(), {
+      settings: mergeAiSettings(currentGlobal.settings, payload.settings),
+      apiKey: payload.apiKey
+    });
+    return workspaceResult;
   });
 
   ipcMain.handle(

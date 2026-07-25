@@ -67,6 +67,15 @@ const getGoalsPath = (workspaceRoot: string) => path.join(workspaceRoot, 'settin
 const getBackupHistoryPath = (workspaceRoot: string) =>
   path.join(workspaceRoot, 'settings', backupHistoryFileName);
 
+export const settingsFileExists = async (root: string): Promise<boolean> => {
+  try {
+    await fs.access(getSettingsPath(root));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const getKeychainPassword = async (account: string) => {
   try {
     const { stdout } = await execFileAsync('security', [

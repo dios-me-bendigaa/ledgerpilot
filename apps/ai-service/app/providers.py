@@ -122,20 +122,33 @@ def _chat_ollama(base_url: str, model: str, prompt: str) -> str:
         return data['message']['content']
 
 
+def _openai_chat_url(base_url: str) -> str:
+    """Accept either a service root, a /v1 root, or a complete chat-completions URL.
+
+    OpenAI uses ``/v1/chat/completions`` while GitHub Models exposes
+    ``/inference/chat/completions``. Requiring callers to guess which fragment LedgerPilot adds
+    caused easy-to-miss duplicated paths such as ``/v1/v1/chat/completions``.
+    """
+    normalized = base_url.rstrip('/')
+    if normalized.endswith('/chat/completions'):
+        return normalized
+    if normalized.endswith('/v1') or normalized.endswith('/inference'):
+        return normalized + '/chat/completions'
+    return normalized + '/v1/chat/completions'
+
+
 def _chat_openai(base_url: str, model: str, api_key: str, prompt: str) -> str:
-    url = base_url.rstrip('/') + '/v1/chat/completions'
+    url = _openai_chat_url(base_url)
     headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
     payload = {
         'model': model,
         'messages': [{'role': 'user', 'content': prompt}],
-        'max_tokens': _MAX_TOKENS,
-        'response_format': {'type': 'json_object'},
     }
     with httpx.Client(timeout=_TIMEOUT) as client:
         resp = client.post(url, json=payload, headers=headers)
         resp.raise_for_status()
         data = resp.json()
-        return data['choices'][0]['message']['content']
+        return _strip_json_fences(data['choices'][0]['message']['content'])
 
 
 def _strip_json_fences(text: str) -> str:
@@ -248,7 +261,7 @@ def test_connection(request: Any) -> str:
     endpoint) surfaces the real exception message so a bad API key, wrong model name, or unreachable
     Ollama host during setup produces an actionable error instead of a silent fallback."""
     provider = request.provider
-    model: str = getattr(request, 'model', None) or ('claude-3-5-sonnet-20241022' if provider == 'claude' else 'llama3.1')
+    model: str = getattr(request, 'model', None) or ('claude-sonnet-4-20250514' if provider == 'claude' else 'llama3.1')
     api_key: str | None = getattr(request, 'api_key', None)
     raw_base_url: str | None = getattr(request, 'base_url', None)
     prompt = 'Reply with exactly this JSON and nothing else: {"status": "ok"}'
