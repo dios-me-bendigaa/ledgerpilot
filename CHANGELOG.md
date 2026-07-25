@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.2.1 — 2026-07-25
+
+### AI and overview
+
+- A connected AI provider now analyses the review queue immediately after an import and opens the review screen with proposed categories. Proposals never modify data until individually approved; approving a new label explicitly adds it to My Categories with income/expense inferred from the transaction direction.
+- Advisor and savings prompts now include up to 1,000 transactions, concrete merchant totals, and transaction evidence so responses can identify actual spending patterns instead of defaulting to generic category advice.
+- Added a beginner-first “Start here” summary and replaced the category donut with a simple ranked spending list.
+- Corrected the toggle geometry with fixed insets so the thumb stays inside its track in both states.
+
 ## v3.2.0 — 2026-07-25
 
 ### Startup, safety, and diagnostics

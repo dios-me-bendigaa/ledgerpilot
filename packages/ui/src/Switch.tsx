@@ -25,10 +25,10 @@ export const Switch = ({ checked, onChange, label, description, disabled = false
     >
       <span
         className={[
-          'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ease-out',
-          // Track is 2.75rem wide with a 1.25rem thumb and 0.125rem inset on each side:
-          // 1.125rem moves the thumb exactly to the right inset instead of past the track.
-          checked ? 'translate-x-[1.125rem]' : 'translate-x-0.5'
+          'absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ease-out',
+          // Pin the thumb with a real left inset. The 44px track leaves exactly 20px of travel
+          // between its two 2px insets, so it cannot escape either side of the track.
+          checked ? 'translate-x-5' : 'translate-x-0'
         ].join(' ')}
       />
     </button>

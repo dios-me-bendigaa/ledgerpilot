@@ -3,11 +3,10 @@ import { ArrowDownRight, ArrowUpRight, CreditCard, HeartPulse, PiggyBank, Trendi
 
 import { Badge, Card, Meter } from '@ledgerpilot/ui';
 
-import { CategoryDonut } from '../components/CategoryDonut';
 import { PageHeader } from '../components/PageHeader';
 import { TrendChart } from '../components/TrendChart';
 import { useWorkspace } from '../context/WorkspaceContext';
-import { formatCurrencyWithCode, maxCategoryTotal } from '../lib/format';
+import { formatCurrencyWithCode } from '../lib/format';
 
 export const OverviewPage = () => {
   const { dashboardData, settings } = useWorkspace();
@@ -15,7 +14,6 @@ export const OverviewPage = () => {
   const formatCurrency = (value: number) => formatCurrencyWithCode(value, settings.homeCurrency || 'CAD');
 
   const kpis = dashboardData.kpis;
-  const highestCategoryTotal = maxCategoryTotal(dashboardData.topExpenseCategories) || 1;
   const comparison = trendRange === 'monthly' ? dashboardData.monthlyComparison : dashboardData.yearlyComparison;
   const trendData = trendRange === 'monthly' ? dashboardData.monthlyTrend : dashboardData.yearlyTrend;
 
@@ -123,6 +121,18 @@ export const OverviewPage = () => {
         </Card>
       </div>
 
+      <Card className="mt-5 border-sky-500/10 bg-slate-900/70 p-6">
+        <p className="text-sm uppercase tracking-[0.2em] text-sky-300">Start here</p>
+        <p className="mt-3 text-lg font-medium text-slate-100">
+          {kpis.reviewCount > 0
+            ? `${kpis.reviewCount} transactions still need a category review. Approve the AI proposals first; your spending picture becomes clearer as you review.`
+            : kpis.netCashFlow >= 0
+              ? `You brought in ${formatCurrency(kpis.income)} and spent ${formatCurrency(kpis.expenses)}. You kept ${formatCurrency(kpis.netCashFlow)} after spending.`
+              : `You spent ${formatCurrency(Math.abs(kpis.netCashFlow))} more than came in. Start with the largest spending areas below and choose one practical cut.`}
+        </p>
+        <p className="mt-2 text-sm text-slate-400">Income is money in. Expenses are money out. Net cash flow is what remains for savings, debt payoff, and goals.</p>
+      </Card>
+
       <div className="mt-5">
         <Card className="border-amber-500/10 bg-slate-900/70 p-7">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -199,10 +209,17 @@ export const OverviewPage = () => {
         </Card>
 
         <Card className="bg-slate-900/70 p-7">
-          <p className="text-sm uppercase tracking-[0.2em] text-sky-300">Spending by category</p>
-          <div className="mt-5">
-            <CategoryDonut data={dashboardData.topExpenseCategories} formatCurrency={formatCurrency} />
-          </div>
+          <p className="text-sm uppercase tracking-[0.2em] text-sky-300">Largest spending areas</p>
+          {dashboardData.topExpenseCategories.length === 0 ? <p className="mt-5 text-sm text-slate-500">Review categories to see where your money is going.</p> : (
+            <ol className="mt-5 space-y-3">
+              {dashboardData.topExpenseCategories.slice(0, 4).map((entry, index) => (
+                <li key={entry.category} className="flex items-center justify-between rounded-xl bg-slate-950/70 px-3.5 py-3 text-sm">
+                  <span className="text-slate-300">{index + 1}. {entry.category.replaceAll('_', ' ')}</span>
+                  <span className="font-medium text-slate-100">{formatCurrency(entry.total)}</span>
+                </li>
+              ))}
+            </ol>
+          )}
         </Card>
       </div>
 

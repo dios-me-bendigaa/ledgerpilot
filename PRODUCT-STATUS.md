@@ -4,7 +4,7 @@ Local-first, AI-assisted personal finance desktop app for macOS. Raw financial d
 on-device by default. This file tracks **what works today** vs **the desired end state** for the
 final version. Update it as functionality lands.
 
-_Last updated: 2026-07-25 · Version: 3.2.0_
+_Last updated: 2026-07-25 · Version: 3.2.1_
 
 ---
 
@@ -64,8 +64,9 @@ _Last updated: 2026-07-25 · Version: 3.2.0_
 ### Review, categorization & rules
 - No preset user-facing categories. Every workspace starts with Uncategorized and a dedicated My
   Categories section for person-created income, expense, or transfer labels.
-- AI suggestions can only offer an already-created category; a person must approve each change.
-  Manual allocation can optionally teach a merchant rule for future imports.
+- A connected provider prepares reviewable category proposals automatically after each import; a
+  person must approve each change. Approving a new proposal explicitly creates it in My Categories,
+  and transaction direction selects an income or expense default.
 
 ### Goals, advisor & optimizer
 - Real goal-creation form (not blind-create-then-edit), read-only goal cards with live progress

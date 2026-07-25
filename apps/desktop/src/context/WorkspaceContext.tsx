@@ -164,6 +164,7 @@ type WorkspaceContextValue = {
   handleSuggestCategories: () => Promise<void>;
   handleAcceptAllSuggestions: () => Promise<void>;
   handleApplySuggestion: (transactionId: string, suggestedCategory: ReviewTransaction['currentCategory']) => Promise<void>;
+  handleApproveProposedCategory: (transaction: ReviewTransaction, category: string) => Promise<void>;
   handleAddCategory: () => Promise<void>;
   handleReassignCategory: (transaction: ReviewTransaction, category: string) => Promise<void>;
   handleAskAdvisor: () => Promise<void>;
@@ -384,13 +385,25 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
       const result = await window.ledgerPilot.imports.start(selectedFiles);
       setSelectedFiles([]);
       await loadWorkspaceState();
-      setActiveView('overview');
+      let suggestionsFound = 0;
+      // A configured AI provider analyses the just-imported review queue immediately. It only
+      // produces proposals: the person still approves each category/rule in Categorize.
+      if (appSettings.aiProvider !== 'local-rules') {
+        try {
+          const suggestions = await window.ledgerPilot.categorization.suggest();
+          setCategorySuggestions(suggestions);
+          suggestionsFound = suggestions.suggestions.filter((suggestion) => suggestion.suggestedCategory !== 'unknown').length;
+        } catch (suggestionError) {
+          toast.error(suggestionError instanceof Error ? `Imported, but AI analysis failed: ${suggestionError.message}` : 'Imported, but AI analysis failed.');
+        }
+      }
+      setActiveView(suggestionsFound > 0 ? 'categorize' : 'overview');
       const inserted = result.normalizationReport?.summary.insertedTransactions ?? 0;
       const malformed = result.normalizationReport?.summary.malformedRowCount ?? 0;
       toast.success(
         malformed > 0
           ? `Imported ${inserted} transactions — ${malformed} row(s) flagged for review due to formatting issues.`
-          : `Imported ${inserted} transactions.`,
+          : `Imported ${inserted} transactions.${suggestionsFound > 0 ? ` AI prepared ${suggestionsFound} category proposals for your review.` : ''}`,
       );
     } catch (nextError) {
       toast.error(nextError instanceof Error ? nextError.message : 'Import failed.');
@@ -499,6 +512,30 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
       });
     } catch (nextError) {
       toast.error(nextError instanceof Error ? nextError.message : 'Failed to apply category override.');
+    } finally {
+      setIsWorking(false);
+    }
+  };
+
+  const handleApproveProposedCategory = async (transaction: ReviewTransaction, category: string) => {
+    const name = category.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!name || name === 'unknown') return;
+    setIsWorking(true);
+    try {
+      const existing = customCategories.some((entry) => entry.name === name);
+      if (!existing) {
+        const next = await window.ledgerPilot.categories.add({
+          name,
+          bucket: transaction.amount >= 0 ? 'income' : 'expense'
+        });
+        setCustomCategories(next.categories);
+      }
+      await window.ledgerPilot.categorization.override({ transactionId: transaction.id, merchantNormalized: transaction.merchantNormalized, category: name });
+      await loadWorkspaceState();
+      setCategorySuggestions((current) => ({ suggestions: current.suggestions.filter((suggestion) => suggestion.transactionId !== transaction.id) }));
+      toast.success(`Approved ${name.replaceAll('_', ' ')} for this merchant.`);
+    } catch (nextError) {
+      toast.error(nextError instanceof Error ? nextError.message : 'Failed to approve the proposed category.');
     } finally {
       setIsWorking(false);
     }
@@ -821,6 +858,7 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
     handleSuggestCategories,
     handleAcceptAllSuggestions,
     handleApplySuggestion,
+    handleApproveProposedCategory,
     handleAddCategory,
     handleReassignCategory,
     handleAskAdvisor,

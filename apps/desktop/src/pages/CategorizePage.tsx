@@ -29,14 +29,14 @@ export const CategorizePage = () => {
   } = useWorkspace();
   const formatCurrency = (value: number) => formatCurrencyWithCode(value, settings.homeCurrency || 'CAD');
 
-  const acceptableCount = categorySuggestions.suggestions.filter((s) => s.suggestedCategory !== 'unknown').length;
+  const acceptableCount = categorySuggestions.suggestions.filter((s) => s.suggestedCategory !== 'unknown' && customCategories.some((category) => category.name === s.suggestedCategory)).length;
 
   return (
     <div>
       <PageHeader
         eyebrow="Categorize"
         title="Review your categories"
-        description="Create categories that fit your life, then approve each transaction suggestion. Nothing is categorized automatically."
+        description="AI proposals are prepared after import when a provider is connected. Review each one before it changes a transaction or future merchant rule."
         actions={
           <>
             <Button variant="secondary" disabled={isWorking || reviewTransactions.length === 0} onClick={() => void handleSuggestCategories()} icon={<Sparkles />}>
@@ -179,8 +179,10 @@ const ReviewRow = ({
   formatCurrency: (value: number) => string;
   isWorking: boolean;
 }) => {
-  const { categorySuggestions, setCategorySuggestions, categoryOptions, handleApplySuggestion } = useWorkspace();
+  const { categorySuggestions, setCategorySuggestions, categoryOptions, customCategories, handleApplySuggestion, handleApproveProposedCategory } = useWorkspace();
   const suggestion = categorySuggestions.suggestions.find((entry) => entry.transactionId === transaction.id);
+  const proposal = suggestion?.suggestedCategory;
+  const isProposedNewCategory = Boolean(proposal && proposal !== 'unknown' && !customCategories.some((category) => category.name === proposal));
 
   return (
     <div className="rounded-2xl bg-slate-950/70 p-4 text-sm transition-colors hover:bg-slate-950/90">
@@ -195,7 +197,7 @@ const ReviewRow = ({
           <Select
             compact
             className="w-36"
-            value={suggestion?.suggestedCategory ?? transaction.currentCategory}
+            value={isProposedNewCategory ? transaction.currentCategory : suggestion?.suggestedCategory ?? transaction.currentCategory}
             onChange={(event) => {
               const category = event.target.value as ReviewTransaction['currentCategory'];
               const existing = categorySuggestions.suggestions.filter((entry) => entry.transactionId !== transaction.id);
@@ -213,14 +215,19 @@ const ReviewRow = ({
           <Button
             size="sm"
             variant="secondary"
-            disabled={isWorking}
+            disabled={isWorking || isProposedNewCategory}
             onClick={() => void handleApplySuggestion(transaction.id, suggestion?.suggestedCategory ?? transaction.currentCategory)}
           >
             Apply
           </Button>
         </div>
       </div>
-      {suggestion && suggestion.suggestedCategory !== 'unknown' ? <p className="mt-2 text-xs text-sky-400">{suggestion.rationale}</p> : null}
+      {suggestion && suggestion.suggestedCategory !== 'unknown' ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-sky-400">
+          <span>{suggestion.rationale}</span>
+          {isProposedNewCategory ? <Button size="sm" variant="secondary" disabled={isWorking} onClick={() => void handleApproveProposedCategory(transaction, suggestion.suggestedCategory)}>Approve &amp; add “{suggestion.suggestedCategory.replaceAll('_', ' ')}”</Button> : null}
+        </div>
+      ) : null}
     </div>
   );
 };

@@ -1134,19 +1134,9 @@ const registerIpcHandlers = () => {
       transactions: getReviewTransactions(),
       apiKey,
     });
-    const userCategories = new Set((await readCustomCategories()).categories.map((category) => category.name));
-    // A model may recognize a merchant, but it is never allowed to introduce an implicit preset
-    // label. Only a category the person already created can be offered for one-click approval.
-    // Everything else stays Uncategorized until the person chooses or creates a fitting label.
-    const approvedVocabulary = {
-      ...suggestions,
-      suggestions: suggestions.suggestions.map((suggestion) =>
-        userCategories.has(suggestion.suggestedCategory)
-          ? suggestion
-          : { ...suggestion, suggestedCategory: 'unknown', confidenceScore: 0, rationale: 'Create or choose one of My Categories before applying a suggestion.' },
-      ),
-    };
-    return applyCategoryRuleOverrides(approvedVocabulary) as Promise<CategorySuggestionPayload>;
+    // Suggestions are deliberately returned as proposals. The renderer requires an explicit
+    // approval before it creates a matching My Category or changes any transaction/rule.
+    return applyCategoryRuleOverrides(suggestions) as Promise<CategorySuggestionPayload>;
   });
 
   ipcMain.handle('categorization:override', async (_event, payload: CategoryOverrideRequest) => {
@@ -1188,7 +1178,9 @@ const registerIpcHandlers = () => {
       settings,
       dashboard: await buildDashboard(),
       goals,
-      transactions: getRecentTransactions(250),
+      // Include a substantial history rather than a tiny recent slice: the provider needs enough
+      // merchant and seasonal context to answer patterns, not generic finance advice.
+      transactions: getRecentTransactions(1_000),
       question,
       apiKey,
     });
@@ -1203,7 +1195,7 @@ const registerIpcHandlers = () => {
       settings,
       dashboard: await buildDashboard(),
       goals,
-      transactions: getRecentTransactions(250),
+      transactions: getRecentTransactions(1_000),
       apiKey,
     }) as Promise<SavingsPlan>;
   });

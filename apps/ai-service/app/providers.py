@@ -51,6 +51,17 @@ def _advisor_prompt(request: AdvisorRequest) -> str:
         '; '.join(f"{name} (\u00d7{count}, ~{avg:.2f} CAD each)" for name, count, avg, _, _ in recurring)
         or 'none detected'
     )
+    merchant_totals: dict[str, float] = {}
+    for transaction in request.transactions:
+        if transaction.amount < 0 and not transaction.is_internal_transfer:
+            merchant_totals[transaction.merchant_normalized or transaction.description_raw] = merchant_totals.get(transaction.merchant_normalized or transaction.description_raw, 0) + abs(transaction.amount)
+    largest_merchants = ', '.join(
+        f'{merchant}: {total:.0f} CAD' for merchant, total in sorted(merchant_totals.items(), key=lambda item: item[1], reverse=True)[:12]
+    ) or 'not enough transaction detail'
+    recent_examples = '\n'.join(
+        f'- {transaction.posted_at}: {transaction.description_raw} ({transaction.amount:.2f} CAD)'
+        for transaction in request.transactions[:80]
+    )
     return (
         f"You are a personal finance advisor. Answer based ONLY on this data. Be specific and "
         f"grounded in the numbers below \u2014 no generic advice.\n\n"
@@ -64,7 +75,9 @@ def _advisor_prompt(request: AdvisorRequest) -> str:
         f"Discretionary spend (restaurants/shopping/travel/lifestyle): {discretionary_total:.0f} CAD\n"
         f"Pure cost with no offsetting value (fees/interest): {pure_cost_total:.0f} CAD\n"
         f"Recurring merchant charges detected: {recurring_summary}\n"
+        f"Largest spending merchants: {largest_merchants}\n"
         f"Transactions analysed: {len(request.transactions)}\n\n"
+        f"Recent transaction evidence (use this rather than inventing examples):\n{recent_examples}\n\n"
         f"If asked which expenses are needed vs waste, use the essential/discretionary split above "
         f"and name the specific discretionary category or recurring merchant driving it \u2014 don't "
         f"guess. If asked about investing, this app is NOT licensed to give investment advice: give "
@@ -72,7 +85,9 @@ def _advisor_prompt(request: AdvisorRequest) -> str:
         f"month emergency buffer, then consider low-cost diversified investing), never name a specific "
         f"product, fund, ticker, or timing, and suggest a licensed financial advisor for personal "
         f"guidance.\n\n"
-        f"Reply with a JSON object with keys: answer (string), "
+        f"Write for a beginner in plain language. State the pattern you found, quote 2–3 actual "
+        f"merchant names/amounts when available, and give one practical next action. Do not repeat "
+        f"the answer in an insight card. Reply with a JSON object with keys: answer (string), "
         f"insights (array of {{title, detail, supporting_data}})."
     )
 
@@ -87,6 +102,13 @@ def _savings_prompt(request: AdvisorRequest) -> str:
         f"{g.name} ({g.target_amount:.0f} CAD by {g.deadline})"
         for g in request.goals[:3]
     )
+    merchant_totals: dict[str, float] = {}
+    for transaction in request.transactions:
+        if transaction.amount < 0 and not transaction.is_internal_transfer:
+            merchant_totals[transaction.merchant_normalized or transaction.description_raw] = merchant_totals.get(transaction.merchant_normalized or transaction.description_raw, 0) + abs(transaction.amount)
+    merchants = ', '.join(
+        f'{merchant}: {total:.0f} CAD' for merchant, total in sorted(merchant_totals.items(), key=lambda item: item[1], reverse=True)[:12]
+    ) or 'not enough transaction detail'
     return (
         f"You are a savings optimizer. Recommend cuts based ONLY on this data.\n\n"
         f"Top spending: {cats}\n"
@@ -94,10 +116,12 @@ def _savings_prompt(request: AdvisorRequest) -> str:
         f"Discretionary spend (cut candidates): {discretionary_total:.0f} CAD\n"
         f"Goals: {goals_summary or 'none'}\n"
         f"Savings rate: {request.dashboard.kpis.savings_rate:.1f}%\n\n"
+        f"Largest merchants (use these concrete patterns, not generic category names): {merchants}\n\n"
         f"Only recommend cuts from discretionary categories, never from essential spend. "
         f"Reply with JSON: recommendations (array of "
         f"{{category, title, monthly_savings (number), goal_impact_days (int), rationale}}).\n"
-        f"Only include categories where real spend exists. Be specific and grounded."
+        f"Only include recommendations grounded in the transactions. Use plain language, name the "
+        f"merchant/pattern and amount, and give a realistic next action."
     )
 
 
