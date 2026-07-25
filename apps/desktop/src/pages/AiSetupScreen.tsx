@@ -74,6 +74,7 @@ export const AiSetupScreen = () => {
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string }>();
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavedConfigurationUnchanged, setIsSavedConfigurationUnchanged] = useState(true);
 
   const requiresConnectionTest = providerRequiresConnectionTest(selected.id);
   const canTest =
@@ -81,7 +82,12 @@ export const AiSetupScreen = () => {
     model.trim().length > 0 &&
     (!selected.needsBaseUrl || baseUrl.trim().length > 0) &&
     (!selected.needsApiKey || apiKey.trim().length > 0);
-  const canContinue = selected.id === 'local-rules' || testResult?.success === true;
+  const canContinue =
+    selected.id === 'local-rules' ||
+    testResult?.success === true ||
+    // On later launches the saved provider configuration has already passed setup. The user can
+    // confirm it and continue without exposing/retyping the Keychain-stored API key.
+    (appSettings.aiSetupCompleted && selected.id === appSettings.aiProvider && isSavedConfigurationUnchanged);
 
   const invalidateTest = () => setTestResult(undefined);
 
@@ -91,6 +97,7 @@ export const AiSetupScreen = () => {
     setBaseUrl(option.defaultBaseUrl ?? '');
     setApiKey('');
     setTestResult(undefined);
+    setIsSavedConfigurationUnchanged(false);
   };
 
   const runTest = async () => {
@@ -191,6 +198,7 @@ export const AiSetupScreen = () => {
               onChange={(event) => {
                 setModel(event.target.value);
                 invalidateTest();
+                setIsSavedConfigurationUnchanged(false);
               }}
             />
             {selected.needsBaseUrl ? (
@@ -200,6 +208,7 @@ export const AiSetupScreen = () => {
                 onChange={(event) => {
                   setBaseUrl(event.target.value);
                   invalidateTest();
+                  setIsSavedConfigurationUnchanged(false);
                 }}
               />
             ) : null}
@@ -212,6 +221,7 @@ export const AiSetupScreen = () => {
                 onChange={(event) => {
                   setApiKey(event.target.value);
                   invalidateTest();
+                  setIsSavedConfigurationUnchanged(false);
                 }}
                 placeholder={`Paste your ${selected.label} key`}
               />

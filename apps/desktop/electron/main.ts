@@ -57,7 +57,7 @@ import {
   upsertGoal,
   writeJsonFile
 } from './local-state.js';
-import { createWorkspace, getWorkspacePath, loadRegistry, migrateLegacyWorkspaceIfNeeded, touchWorkspace } from './workspace-registry.js';
+import { createWorkspace, deleteWorkspace, getWorkspacePath, loadRegistry, migrateLegacyWorkspaceIfNeeded, touchWorkspace } from './workspace-registry.js';
 
 const isDev = !app.isPackaged;
 const workspaceName = 'LedgerPilot';
@@ -536,6 +536,13 @@ const migrations: Migration[] = [
       }
       db.exec('CREATE INDEX IF NOT EXISTS idx_transactions_account_posted ON transactions (account_name, posted_at);');
     }
+  },
+  {
+    version: 4,
+    description: 'reset legacy preset categories for user-managed categories',
+    migrate: (db) => {
+      db.prepare("UPDATE transactions SET category = 'unknown', requires_review = 1").run();
+    }
   }
 ];
 
@@ -566,6 +573,15 @@ const initializeDatabase = async () => {
   await fs.mkdir(path.dirname(dbPath), { recursive: true });
   database = new Database(dbPath);
   const { from, to } = runMigrations(database, (message) => void writeLog(message));
+  if (from < 4) {
+    // v4 deliberately starts each workspace's My Categories configuration empty. Existing labels
+    // and merchant rules were generated from the old preset taxonomy and must not survive.
+    await Promise.all([
+      fs.rm(getCategoryRulesPath(), { force: true }),
+      fs.rm(getCustomCategoriesPath(), { force: true })
+    ]);
+    await writeLog('category migration: cleared legacy rules and custom categories');
+  }
   await writeLog(`initializeDatabase ready schemaVersion ${from} -> ${to}`);
 };
 
@@ -832,16 +848,17 @@ const getKnownFingerprints = (excludeBatchId: string): Set<string> => {
 // the user's prior correction every time normalization re-runs.
 const applySavedRulesToTransactions = async (transactions: NormalizedTransaction[]): Promise<NormalizedTransaction[]> => {
   const rules = await readCategoryRules();
-  if (rules.rules.length === 0) {
-    return transactions;
-  }
-
   const ruleByMerchant = new Map(rules.rules.map((rule) => [rule.merchantPattern, rule]));
 
   return transactions.map((transaction) => {
     const matchedRule = ruleByMerchant.get(transaction.merchantNormalized);
     if (!matchedRule) {
-      return transaction;
+      return {
+        ...transaction,
+        category: 'unknown',
+        requiresReview: true,
+        confidenceScore: Math.min(transaction.confidenceScore, 0.5)
+      };
     }
 
     return {
@@ -933,6 +950,19 @@ const buildExportPayload = async () => {
 };
 
 const registerIpcHandlers = () => {
+  ipcMain.handle(
+    'diagnostics:renderer-action-failed',
+    async (_event, payload: { channel?: unknown; message?: unknown; stack?: unknown }) => {
+      const redact = (value: unknown) => String(value ?? '')
+        .replace(/(?:sk|sk-ant|AIza)[-_a-zA-Z0-9]{12,}/g, '[redacted-api-key]')
+        .slice(0, 4_000);
+      await writeLog(
+        `renderer action failed channel=${redact(payload.channel)} message=${redact(payload.message)} ` +
+        `stack=${redact(payload.stack)}`,
+      );
+    },
+  );
+
   // App-level AI setup and workspace selection are the handlers available before a financial
   // workspace has been chosen. All financial-data handlers below remain workspace-scoped.
   ipcMain.handle('settings:get-global', async () => {
@@ -949,6 +979,14 @@ const registerIpcHandlers = () => {
 
   ipcMain.handle('workspace:create', async (_event, name: string) => {
     return createWorkspace(getAppRoot(), name) as Promise<WorkspaceRegistryEntry>;
+  });
+
+  ipcMain.handle('workspace:delete', async (_event, workspaceId: string) => {
+    if (workspaceId === activeWorkspaceId) {
+      throw new Error('Return to the workspace picker before deleting the active workspace.');
+    }
+    await writeLog(`workspace:delete id=${workspaceId}`);
+    return deleteWorkspace(getAppRoot(), workspaceId) as Promise<WorkspaceRegistry>;
   });
 
   ipcMain.handle('workspace:select', async (_event, workspaceId: string) => {
@@ -1068,7 +1106,10 @@ const registerIpcHandlers = () => {
       // Prefer the key the user just typed (not yet saved); fall back to whatever's already in
       // Keychain so re-testing an already-configured provider doesn't require re-entering the key.
       const apiKey = payload.apiKey || (await loadApiKey());
-      return testProviderConnection({ ...payload, apiKey });
+      const result = await testProviderConnection({ ...payload, apiKey });
+      // Provider responses are already sanitized and bounded by the sidecar. Never log apiKey.
+      await writeLog(`provider:test provider=${payload.provider} success=${result.success} message=${result.message}`);
+      return result;
     },
   );
 
@@ -1093,7 +1134,19 @@ const registerIpcHandlers = () => {
       transactions: getReviewTransactions(),
       apiKey,
     });
-    return applyCategoryRuleOverrides(suggestions) as Promise<CategorySuggestionPayload>;
+    const userCategories = new Set((await readCustomCategories()).categories.map((category) => category.name));
+    // A model may recognize a merchant, but it is never allowed to introduce an implicit preset
+    // label. Only a category the person already created can be offered for one-click approval.
+    // Everything else stays Uncategorized until the person chooses or creates a fitting label.
+    const approvedVocabulary = {
+      ...suggestions,
+      suggestions: suggestions.suggestions.map((suggestion) =>
+        userCategories.has(suggestion.suggestedCategory)
+          ? suggestion
+          : { ...suggestion, suggestedCategory: 'unknown', confidenceScore: 0, rationale: 'Create or choose one of My Categories before applying a suggestion.' },
+      ),
+    };
+    return applyCategoryRuleOverrides(approvedVocabulary) as Promise<CategorySuggestionPayload>;
   });
 
   ipcMain.handle('categorization:override', async (_event, payload: CategoryOverrideRequest) => {

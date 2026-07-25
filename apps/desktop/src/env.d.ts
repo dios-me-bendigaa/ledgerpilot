@@ -89,7 +89,11 @@ declare global {
         clear: () => Promise<void>;
         list: () => Promise<WorkspaceRegistry>;
         create: (name: string) => Promise<WorkspaceRegistryEntry>;
+        delete: (workspaceId: string) => Promise<WorkspaceRegistry>;
         select: (workspaceId: string) => Promise<void>;
+      };
+      diagnostics: {
+        reportError: (message: string, stack?: string) => Promise<void>;
       };
       menuEvents: {
         onNavigate: (callback: (view: string) => void) => () => void;

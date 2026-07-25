@@ -53,9 +53,9 @@ export const AdvisorPage = () => {
               </div>
               <div className="max-w-2xl space-y-3 rounded-2xl rounded-tl-sm bg-slate-950/70 px-4 py-3.5 text-sm">
                 <p className="leading-7 text-slate-200">{advisorResponse.answer}</p>
-                {advisorResponse.insights.length > 0 ? (
+                {advisorResponse.insights.filter((insight) => insight.detail.trim() !== advisorResponse.answer.trim()).length > 0 ? (
                   <div className="space-y-2 border-t border-white/5 pt-3">
-                    {advisorResponse.insights.map((insight) => (
+                    {advisorResponse.insights.filter((insight) => insight.detail.trim() !== advisorResponse.answer.trim()).map((insight) => (
                       <div key={insight.title} className="rounded-xl bg-slate-900/70 p-3">
                         <p className="font-medium text-slate-100">{insight.title}</p>
                         <p className="mt-1 text-slate-300">{insight.detail}</p>

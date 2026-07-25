@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import { ArrowDownRight, ArrowUpRight, Calendar, CreditCard, HeartPulse, PiggyBank, TrendingUp } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, CreditCard, HeartPulse, PiggyBank, TrendingUp } from 'lucide-react';
 
 import { Badge, Card, Meter } from '@ledgerpilot/ui';
 
-import { CalendarHeatmap } from '../components/CalendarHeatmap';
 import { CategoryDonut } from '../components/CategoryDonut';
 import { PageHeader } from '../components/PageHeader';
 import { TrendChart } from '../components/TrendChart';
@@ -178,7 +177,7 @@ export const OverviewPage = () => {
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <TrendUpIcon />
-              <p className="text-sm uppercase tracking-[0.2em] text-violet-300">Income &amp; expenses</p>
+              <p className="text-sm uppercase tracking-[0.2em] text-violet-300">Cash in &amp; cash out</p>
             </div>
             <div className="flex rounded-lg bg-slate-950/70 p-1 text-xs">
               {(['monthly', 'yearly'] as const).map((range) => (
@@ -265,13 +264,17 @@ export const OverviewPage = () => {
       <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr]">
         <Card className="bg-slate-900/70 p-7">
           <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-indigo-400" />
-            <p className="text-sm uppercase tracking-[0.2em] text-indigo-300">Spending calendar</p>
+            <TrendingUp className="h-4 w-4 text-indigo-400" />
+            <p className="text-sm uppercase tracking-[0.2em] text-indigo-300">Spending snapshot</p>
           </div>
-          <p className="mt-1 text-xs text-slate-500">Last 90 days — darker means more spent that day.</p>
-          <div className="mt-5">
-            <CalendarHeatmap points={dashboardData.spendingCalendar} formatCurrency={formatCurrency} />
-          </div>
+          {dashboardData.topExpenseCategories.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">Import transactions, then review Uncategorized items to see a useful spending summary.</p>
+          ) : (
+            <div className="mt-4 space-y-3">
+              <p className="text-sm leading-6 text-slate-300">Your biggest reviewed spending area is <span className="font-medium text-slate-100">{dashboardData.topExpenseCategories[0].category.replaceAll('_', ' ')}</span> at {formatCurrency(dashboardData.topExpenseCategories[0].total)}.</p>
+              <p className="text-xs leading-5 text-slate-500">Use Categorize to name Uncategorized transactions; this keeps the summary focused on choices you have reviewed.</p>
+            </div>
+          )}
         </Card>
 
         <Card className="bg-slate-900/70 p-7">

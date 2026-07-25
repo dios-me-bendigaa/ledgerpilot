@@ -4,14 +4,14 @@ Local-first, AI-assisted personal finance desktop app for macOS. Raw financial d
 on-device by default. This file tracks **what works today** vs **the desired end state** for the
 final version. Update it as functionality lands.
 
-_Last updated: 2026-07-25 · Version: 3.1.1_
+_Last updated: 2026-07-25 · Version: 3.2.0_
 
 ---
 
 ## Current functionality (implemented today)
 
 ### Workspaces
-- Multi-workspace support: an explicit "choose a workspace" screen shown every launch (never
+- Multi-workspace support: an AI Settings confirmation followed by an explicit "choose a workspace" screen shown every launch (never
   auto-resumes the last one), with create-new-workspace inline. Each workspace has fully isolated
   transactions, goals, settings, and rules.
 - Existing single-workspace installs migrate automatically and safely (rename-based, no data
@@ -24,8 +24,9 @@ _Last updated: 2026-07-25 · Version: 3.1.1_
   Switch, Skeleton, EmptyState, Toast — consistent look across every page.
 - Native macOS application menu: custom About panel, Preferences, File (Import/Export/Backup),
   Edit, View (page shortcuts), Window, Help.
-- App-level first-run analysis setup shown before workspace selection: Local Rules can continue
-  fully offline, while Claude, OpenAI-compatible, and Ollama require a live connection test.
+- App-level AI setup shown before workspace selection on every launch: saved Keychain credentials
+  can be confirmed without re-entry; Local Rules can continue fully offline, while Claude,
+  OpenAI-compatible, and Ollama require a live connection test after a change.
 
 ### Import
 - CSV import via file picker and drag-and-drop, up to 10 files per batch.
@@ -38,8 +39,8 @@ _Last updated: 2026-07-25 · Version: 3.1.1_
 ### Normalization & classification
 - Canonical transaction model persisted in local SQLite (`better-sqlite3`).
 - Merchant normalization, duplicate-transaction fingerprinting (with repeat-occurrence handling).
-- Category classification via: merchant overrides → bank's own category column → account-type
-  context → description keyword rules; low-confidence rows (< 0.7) flagged for review.
+- New imports remain Uncategorized unless a user-approved merchant rule applies; transaction
+  direction still supplies safe income/expense context without assigning a user category.
 - Fixed: a `Debit=0`/`Credit=0` placeholder row (seen in real NBC exports) no longer picks up the
   Balance column as its amount — resolves to a correctly-dropped $0 no-op instead of a phantom fee.
 - Fixed: the `nsf` fee keyword no longer accidentally matches any description containing
@@ -54,17 +55,17 @@ _Last updated: 2026-07-25 · Version: 3.1.1_
 - KPIs: net cash flow, income, discretionary expenses, savings rate, interest paid, debt payments,
   budget health, financial-health score, internal-transfer count, review count.
 - Debt breakdown (mortgage / car / rent / credit-card / line-of-credit), kept separate from spend.
-- Top expense categories, expenses rolled up into parent groups with drill-down.
-- Month-over-month category comparison, monthly and yearly trends (real chart components via
-  Recharts), spending calendar heatmap, account→category flow summaries.
+- Top reviewed categories, expenses rolled up into parent groups with drill-down.
+- Month-over-month category comparison, plain-language cash-in/cash-out trends, an actionable
+  spending snapshot, and account→category flow summaries.
 - India-expense netting (Remitly debits netted against INTERAC credits), generalized to any
   custom category via a per-category netting flag.
 
 ### Review, categorization & rules
-- Review queue with AI category suggestions (local-rules, Ollama, OpenAI-compatible, and Claude).
-- Manual allocation of any transaction; "teach once, apply to all" propagates a correction to
-  transactions sharing the same merchant and to future imports via saved rules.
-- User-defined custom categories tagged as income / expense / transfer.
+- No preset user-facing categories. Every workspace starts with Uncategorized and a dedicated My
+  Categories section for person-created income, expense, or transfer labels.
+- AI suggestions can only offer an already-created category; a person must approve each change.
+  Manual allocation can optionally teach a merchant rule for future imports.
 
 ### Goals, advisor & optimizer
 - Real goal-creation form (not blind-create-then-edit), read-only goal cards with live progress
@@ -82,7 +83,7 @@ _Last updated: 2026-07-25 · Version: 3.1.1_
 
 ### Settings, backup & platform
 - Settings persistence; Keychain-backed API-key storage; opt-in cloud AI and telemetry (off by
-  default).
+  default); automatic safe diagnostics at `~/Library/Application Support/LedgerPilot/logs/desktop.log`.
 - Encrypted local backups with history (including category rules, custom categories, and
   normalization reports); two-step-confirmed restore; JSON export; "clear all data" wipe.
 - Startup error fallback UI; workspace bootstrap on first launch.

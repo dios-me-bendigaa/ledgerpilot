@@ -23,6 +23,21 @@ _TIMEOUT = 30.0
 _MAX_TOKENS = 1024
 
 
+def describe_provider_error(exc: Exception) -> str:
+    """Return a useful, bounded provider failure without exposing credentials."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        response = exc.response
+        body = response.text.strip().replace('\n', ' ')
+        # Provider bodies can contain a request id, but must never echo a bearer/API key into the
+        # desktop log. This also keeps a giant HTML proxy response from flooding the UI/log.
+        body = body.replace('Bearer ', 'Bearer [redacted] ')
+        body = body[:800]
+        if response.status_code == 429:
+            return f'{response.status_code} Too Many Requests: API quota is exhausted or rate limited. {body}'
+        return f'{response.status_code} {response.reason_phrase}: {body or "The provider did not include details."}'
+    return str(exc)
+
+
 def _advisor_prompt(request: AdvisorRequest) -> str:
     # Lazy import: app.main imports this module at load time, so importing app.main back at this
     # module's top level would be circular. Same pattern as the dispatch_* functions below.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from collections import defaultdict
 from datetime import date, datetime, timedelta
@@ -8,6 +9,8 @@ from typing import Literal, Optional
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from app import providers
+
+logger = logging.getLogger(__name__)
 
 
 # "Needed" vs "wasteful" tiers for expense categories — used by the advisor to actually answer
@@ -181,14 +184,14 @@ def _days_until(deadline: str) -> int:
     return max((_parse_date(deadline) - date.today()).days, 1)
 
 
-def _add_days(base: date, days: float) -> date:
+def _add_days(base: date, days: float) -> Optional[date]:
     """Adds a (possibly large) number of days to a date without raising on absurd inputs — a
     goal that's barely making progress can project centuries out, which should read as "not
     reachable on this trajectory" rather than crash the endpoint."""
     try:
         return date.fromordinal(min(base.toordinal() + int(round(days)), date.max.toordinal()))
     except (ValueError, OverflowError):
-        return date(9999, 12, 31)
+        return None
 
 
 def _estimate_goal_forecasts(
@@ -218,7 +221,7 @@ def _estimate_goal_forecasts(
             months_to_complete = min(remaining / total_monthly_available, 1200)
             projected = _add_days(date.today(), months_to_complete * 30)
         else:
-            projected = date(9999, 12, 31)  # never, at zero or negative net savings capacity
+            projected = None
 
         if total_monthly_available >= monthly_required:
             if avg_monthly_net >= monthly_required:
@@ -251,7 +254,7 @@ def _estimate_goal_forecasts(
                 alt_option = (
                     f"Realistic alternatives: settle for ${max_reachable:.0f} by your original deadline, "
                     f"or keep the full ${goal.target_amount:.0f} target and expect to reach it by "
-                    f"{projected.isoformat()} instead."
+                    f"{projected.isoformat() if projected else 'a later date'} instead."
                 )
             if shortfall > avg_monthly_net * 0.25:
                 verdict = 'needs_income_boost'
@@ -275,7 +278,7 @@ def _estimate_goal_forecasts(
                 goal_id=goal.id,
                 goal_name=goal.name,
                 required_monthly_savings=monthly_required,
-                projected_completion_date=projected.isoformat(),
+                projected_completion_date=projected.isoformat() if projected else 'Not projected yet',
                 success_probability=success_probability,
                 verdict=verdict,
                 shortfall_per_month=shortfall,
@@ -1066,7 +1069,12 @@ def provider_test(request: ProviderTestRequest) -> ProviderTestResponse:
         reply = providers.test_connection(request)
         return ProviderTestResponse(success=True, message='Connected successfully.', sample_reply=reply[:200])
     except Exception as exc:  # noqa: BLE001 - intentionally broad; message shown directly to the user
-        return ProviderTestResponse(success=False, message=str(exc))
+        # Providers often put the actionable reason (quota exhausted, unsupported model, malformed
+        # request) only in their response body. Log and return a sanitized, bounded version; API
+        # keys are never included in this path.
+        message = providers.describe_provider_error(exc)
+        logger.warning('provider test failed provider=%s: %s', request.provider, message)
+        return ProviderTestResponse(success=False, message=message)
 
 
 @app.post('/advisor/respond', response_model=AdvisorResponse)

@@ -91,10 +91,13 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, Error
 }
 
 window.addEventListener('error', (event) => {
+  void window.ledgerPilot.diagnostics.reportError(event.message, event.error?.stack);
   renderFatalError('Unhandled renderer error', event.error?.stack ?? event.message);
 });
 
 window.addEventListener('unhandledrejection', (event) => {
+  const details = event.reason instanceof Error ? event.reason.stack ?? event.reason.message : String(event.reason);
+  void window.ledgerPilot.diagnostics.reportError('Unhandled promise rejection', details);
   renderFatalError('Unhandled promise rejection', String(event.reason));
 });
 

@@ -28,6 +28,7 @@ export const AppShell = () => {
     activeView,
     fatalError,
     appSettings,
+    hasConfirmedAiSetup,
     isLoadingAppSettings,
     isLoadingWorkspaces,
     activeWorkspaceId,
@@ -64,8 +65,9 @@ export const AppShell = () => {
     );
   }
 
-  // Provider selection is app-level and always precedes access to financial workspaces.
-  if (!appSettings.aiSetupCompleted) {
+  // Provider selection is app-level and always precedes access to financial workspaces on every
+  // launch. Existing saved settings can be confirmed without re-entering a Keychain-stored key.
+  if (!hasConfirmedAiSetup) {
     return <AiSetupScreen />;
   }
 

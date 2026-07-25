@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FolderOpen, Plus, Sparkles } from 'lucide-react';
+import { FolderOpen, Plus, Sparkles, Trash2 } from 'lucide-react';
 
 import { Button, Card, EmptyState, Input } from '@ledgerpilot/ui';
 
@@ -10,10 +10,11 @@ import { relativeTime } from '../lib/format';
 // which financial dataset to open. Creating a workspace routes to CSV import; opening an existing
 // one routes to its dashboard.
 export const WorkspacePickerScreen = () => {
-  const { workspaces, handleSelectWorkspace, handleCreateWorkspace, isWorking } = useWorkspace();
+  const { workspaces, handleSelectWorkspace, handleCreateWorkspace, handleDeleteWorkspace, isWorking } = useWorkspace();
   const [isCreating, setIsCreating] = useState(workspaces.length === 0);
   const [newName, setNewName] = useState('');
   const [pendingId, setPendingId] = useState<string>();
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string>();
 
   const openWorkspace = async (id: string) => {
     setPendingId(id);
@@ -50,12 +51,12 @@ export const WorkspacePickerScreen = () => {
         {workspaces.length > 0 ? (
           <div className="mt-6 space-y-2.5">
             {workspaces.map((workspace) => (
-              <button
-                key={workspace.id}
-                disabled={isWorking}
-                onClick={() => void openWorkspace(workspace.id)}
-                className="flex w-full items-center justify-between gap-3 rounded-2xl border border-white/5 bg-slate-950/60 p-4 text-left transition-colors hover:border-sky-400/30 disabled:cursor-not-allowed disabled:opacity-60"
-              >
+              <div key={workspace.id} className="flex w-full items-center gap-2 rounded-2xl border border-white/5 bg-slate-950/60 p-2 transition-colors hover:border-sky-400/30">
+                <button
+                  disabled={isWorking}
+                  onClick={() => void openWorkspace(workspace.id)}
+                  className="flex min-w-0 flex-1 items-center justify-between gap-3 p-2 text-left disabled:cursor-not-allowed disabled:opacity-60"
+                >
                 <div className="flex items-center gap-3">
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-slate-500">
                     <FolderOpen className="h-4 w-4" />
@@ -66,7 +67,29 @@ export const WorkspacePickerScreen = () => {
                   </div>
                 </div>
                 <span className="shrink-0 text-xs text-sky-400">{pendingId === workspace.id && isWorking ? 'Opening…' : 'Open'}</span>
-              </button>
+                </button>
+                <button
+                  type="button"
+                  disabled={isWorking}
+                  onClick={() => {
+                    if (deleteConfirmId === workspace.id) {
+                      void handleDeleteWorkspace(workspace.id);
+                      setDeleteConfirmId(undefined);
+                    } else {
+                      setDeleteConfirmId(workspace.id);
+                    }
+                  }}
+                  className={[
+                    'shrink-0 rounded-xl px-3 py-2 text-xs transition-colors disabled:opacity-50',
+                    deleteConfirmId === workspace.id
+                      ? 'bg-rose-500/15 text-rose-200 hover:bg-rose-500/25'
+                      : 'text-slate-500 hover:bg-rose-500/10 hover:text-rose-300'
+                  ].join(' ')}
+                  title="Delete this workspace and all of its local data"
+                >
+                  {deleteConfirmId === workspace.id ? 'Confirm delete' : <Trash2 className="h-4 w-4" />}
+                </button>
+              </div>
             ))}
           </div>
         ) : null}

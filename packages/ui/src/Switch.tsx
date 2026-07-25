@@ -26,7 +26,9 @@ export const Switch = ({ checked, onChange, label, description, disabled = false
       <span
         className={[
           'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ease-out',
-          checked ? 'translate-x-[1.375rem]' : 'translate-x-0.5'
+          // Track is 2.75rem wide with a 1.25rem thumb and 0.125rem inset on each side:
+          // 1.125rem moves the thumb exactly to the right inset instead of past the track.
+          checked ? 'translate-x-[1.125rem]' : 'translate-x-0.5'
         ].join(' ')}
       />
     </button>

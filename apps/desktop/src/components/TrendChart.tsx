@@ -23,7 +23,7 @@ const ChartTooltip = ({
 }) => {
   if (!active || !payload || payload.length === 0) return null;
 
-  const names: Record<string, string> = { income: 'Income', expenses: 'Expenses', netCashFlow: 'Net cash flow' };
+  const names: Record<string, string> = { income: 'Cash in', expenses: 'Cash out', netCashFlow: 'Left over' };
 
   return (
     <div className="rounded-xl border border-white/10 bg-slate-900/95 px-3.5 py-2.5 text-xs shadow-2xl backdrop-blur">
@@ -50,7 +50,7 @@ export const TrendChart = ({ data, formatCurrency, emptyMessage }: TrendChartPro
       <EmptyState
         className="h-64"
         title="No trend data yet"
-        description={emptyMessage ?? 'Import and normalize a CSV to see income vs. expenses over time.'}
+        description={emptyMessage ?? 'Import and normalize a CSV to see cash in, cash out, and what remains over time.'}
       />
     );
   }

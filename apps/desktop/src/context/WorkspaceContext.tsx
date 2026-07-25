@@ -1,5 +1,4 @@
 import {
-  ALL_CATEGORIES,
   maxImportFilesPerBatch,
   type AdvisorResponse,
   type CustomCategory,
@@ -98,6 +97,7 @@ type WorkspaceContextValue = {
   workspaces: WorkspaceRegistryEntry[];
   activeWorkspaceId: string | undefined;
   appSettings: AppSettings;
+  hasConfirmedAiSetup: boolean;
   isLoadingAppSettings: boolean;
   isLoadingWorkspaces: boolean;
 
@@ -153,6 +153,7 @@ type WorkspaceContextValue = {
   loadWorkspaceState: () => Promise<TransactionSummary | undefined>;
   handleSelectWorkspace: (workspaceId: string) => Promise<void>;
   handleCreateWorkspace: (name: string) => Promise<void>;
+  handleDeleteWorkspace: (workspaceId: string) => Promise<void>;
   handleCompleteAiSetup: (settings: AppSettings, apiKey?: string) => Promise<void>;
   setFilesWithLimitCheck: (files: ImportFileDescriptor[]) => void;
   handleSelectFiles: () => Promise<void>;
@@ -186,6 +187,7 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
   const [workspaces, setWorkspaces] = useState<WorkspaceRegistryEntry[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>();
   const [appSettings, setAppSettings] = useState<AppSettings>(emptySettings);
+  const [hasConfirmedAiSetup, setHasConfirmedAiSetup] = useState(false);
   const [isLoadingAppSettings, setIsLoadingAppSettings] = useState(true);
   const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(true);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
@@ -324,12 +326,21 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
     }
   };
 
+  const handleDeleteWorkspace = async (workspaceId: string) => {
+    try {
+      setWorkspaces((await window.ledgerPilot.workspace.delete(workspaceId)).workspaces);
+    } catch (nextError) {
+      toast.error(nextError instanceof Error ? nextError.message : 'Failed to delete workspace.');
+    }
+  };
+
   const handleCompleteAiSetup = async (nextSettings: AppSettings, apiKey?: string) => {
     const response = await window.ledgerPilot.settings.saveGlobal({
       settings: nextSettings,
       apiKey: apiKey?.trim() || undefined
     });
     setAppSettings(response.settings);
+    setHasConfirmedAiSetup(true);
   };
 
   const mergeFiles = (incomingFiles: ImportFileDescriptor[]) => {
@@ -531,9 +542,9 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
     }
   };
 
-  // Built-in categories plus any user-defined ones (kept before the trailing "unknown" entry).
+  // Categories belong to the user. New workspaces start with only Uncategorized until they add
+  // labels that reflect their own lifestyle and expense structure.
   const categoryOptions = [
-    ...ALL_CATEGORIES.filter((c) => c !== 'unknown'),
     ...customCategories.map((c) => c.name),
     'unknown'
   ];
@@ -753,6 +764,7 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
     workspaces,
     activeWorkspaceId,
     appSettings,
+    hasConfirmedAiSetup,
     isLoadingAppSettings,
     isLoadingWorkspaces,
     isLoadingWorkspace,
@@ -798,6 +810,7 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
     loadWorkspaceState,
     handleSelectWorkspace,
     handleCreateWorkspace,
+    handleDeleteWorkspace,
     handleCompleteAiSetup,
     setFilesWithLimitCheck,
     handleSelectFiles,

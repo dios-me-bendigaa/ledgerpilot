@@ -1,5 +1,25 @@
 # Changelog
 
+## v3.2.0 — 2026-07-25
+
+### Startup, safety, and diagnostics
+
+- Every launch now requires a quick AI Settings confirmation before the workspace picker. Saved Keychain credentials remain available without re-entry when the configuration is unchanged.
+- Added an explicit two-step workspace deletion action. Workspaces are never silently removed during an update or reinstall.
+- Added automatic desktop-log reporting for failed renderer actions, including the IPC action, safe error message, and stack. Provider test failures retain sanitized status/body details without API keys.
+
+### Categories and imports
+
+- Removed built-in user-facing categories. Workspaces now begin with only Uncategorized, and legacy categories, rules, and custom labels are reset for review.
+- Added the dedicated **My Categories** flow. Suggestions can only offer categories a user has already created; applying a category or merchant rule always requires an explicit user action.
+- New imports remain Uncategorized unless a user-approved rule matches. Headerless CIBC credit-card charges continue to normalize as cash out.
+
+### Clarity and dashboard
+
+- Fixed the switch thumb alignment, simplified the chart as Cash in & Cash out, and replaced the spending-calendar heatmap with an actionable spending snapshot.
+- Removed repeated Advisor answer cards and made unreachable goal completion dates read “Not projected yet” instead of showing a fake date.
+- Retained the Intel-specific x64 release build runner so the bundled AI sidecar remains compatible with Intel Macs.
+
 ## v3.1.1 — 2026-07-25
 
 ### Fixed

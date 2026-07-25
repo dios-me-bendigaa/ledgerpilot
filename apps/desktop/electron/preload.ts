@@ -26,24 +26,39 @@ import type {
   WorkspaceRegistryEntry
 } from '@ledgerpilot/core';
 
+const describeError = (error: unknown) =>
+  error instanceof Error ? { message: error.message, stack: error.stack } : { message: String(error) };
+
+// Every renderer-to-main operation is tracked here. UI handlers may catch an error to show a
+// friendly toast, but the original failure is still written to desktop.log for support.
+const trackedInvoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
+  ipcRenderer.invoke(channel, ...args).catch(async (error: unknown) => {
+    try {
+      await ipcRenderer.invoke('diagnostics:renderer-action-failed', { channel, ...describeError(error) });
+    } catch {
+      // Diagnostics must never mask the original operation failure.
+    }
+    throw error;
+  }) as Promise<T>;
+
 const imports = {
-  selectFiles: () => ipcRenderer.invoke('imports:select-files') as Promise<ImportFileDescriptor[]>,
+  selectFiles: () => trackedInvoke('imports:select-files') as Promise<ImportFileDescriptor[]>,
   start: (files: ImportFileDescriptor[]) =>
-    ipcRenderer.invoke('imports:start', files) as Promise<ImportWorkflowResult>,
-  history: () => ipcRenderer.invoke('imports:history') as Promise<ImportHistory>,
+    trackedInvoke('imports:start', files) as Promise<ImportWorkflowResult>,
+  history: () => trackedInvoke('imports:history') as Promise<ImportHistory>,
   resume: (batchId: string) =>
-    ipcRenderer.invoke('imports:resume', batchId) as Promise<ResumeImportResult>
+    trackedInvoke('imports:resume', batchId) as Promise<ResumeImportResult>
 };
 
 const normalization = {
-  history: () => ipcRenderer.invoke('normalization:history') as Promise<NormalizationHistory>,
+  history: () => trackedInvoke('normalization:history') as Promise<NormalizationHistory>,
   rerunBatch: (batchId: string) =>
-    ipcRenderer.invoke('normalization:rerun-batch', batchId) as Promise<NormalizationReport | undefined>
+    trackedInvoke('normalization:rerun-batch', batchId) as Promise<NormalizationReport | undefined>
 };
 
 const transactions = {
   summary: () =>
-    ipcRenderer.invoke('transactions:summary') as Promise<{
+    trackedInvoke('transactions:summary') as Promise<{
       totalTransactions: number;
       income: number;
       expenses: number;
@@ -51,64 +66,70 @@ const transactions = {
       internalTransfers: number;
       topCategories: Array<{ category: string; total: number }>;
     }>,
-  review: () => ipcRenderer.invoke('transactions:review') as Promise<{ transactions: ReviewTransaction[] }>,
-  all: () => ipcRenderer.invoke('transactions:all') as Promise<{ transactions: ReviewTransaction[] }>
+  review: () => trackedInvoke('transactions:review') as Promise<{ transactions: ReviewTransaction[] }>,
+  all: () => trackedInvoke('transactions:all') as Promise<{ transactions: ReviewTransaction[] }>
 };
 
 const dashboard = {
-  data: () => ipcRenderer.invoke('dashboard:data') as Promise<DashboardData>
+  data: () => trackedInvoke('dashboard:data') as Promise<DashboardData>
 };
 
 const settings = {
-  getGlobal: () => ipcRenderer.invoke('settings:get-global') as Promise<SettingsPayload>,
+  getGlobal: () => trackedInvoke('settings:get-global') as Promise<SettingsPayload>,
   saveGlobal: (payload: SettingsPayload & { apiKey?: string }) =>
-    ipcRenderer.invoke('settings:save-global', payload) as Promise<SettingsPayload>,
-  get: () => ipcRenderer.invoke('settings:get') as Promise<SettingsPayload>,
+    trackedInvoke('settings:save-global', payload) as Promise<SettingsPayload>,
+  get: () => trackedInvoke('settings:get') as Promise<SettingsPayload>,
   save: (payload: SettingsPayload & { apiKey?: string }) =>
-    ipcRenderer.invoke('settings:save', payload) as Promise<SettingsPayload>,
+    trackedInvoke('settings:save', payload) as Promise<SettingsPayload>,
   testProvider: (payload: { provider: AppSettings['aiProvider']; model?: string; baseUrl?: string; apiKey?: string }) =>
-    ipcRenderer.invoke('provider:test', payload) as Promise<{ success: boolean; message: string; sampleReply?: string }>
+    trackedInvoke('provider:test', payload) as Promise<{ success: boolean; message: string; sampleReply?: string }>
 };
 
 const goals = {
-  get: () => ipcRenderer.invoke('goals:get') as Promise<GoalsPayload>,
-  upsert: (goal: Goal) => ipcRenderer.invoke('goals:upsert', goal) as Promise<GoalsPayload>,
-  delete: (goalId: string) => ipcRenderer.invoke('goals:delete', goalId) as Promise<GoalsPayload>
+  get: () => trackedInvoke('goals:get') as Promise<GoalsPayload>,
+  upsert: (goal: Goal) => trackedInvoke('goals:upsert', goal) as Promise<GoalsPayload>,
+  delete: (goalId: string) => trackedInvoke('goals:delete', goalId) as Promise<GoalsPayload>
 };
 
 const categorization = {
-  suggest: () => ipcRenderer.invoke('categorization:suggest') as Promise<CategorySuggestionPayload>,
+  suggest: () => trackedInvoke('categorization:suggest') as Promise<CategorySuggestionPayload>,
   override: (payload: CategoryOverrideRequest) =>
-    ipcRenderer.invoke('categorization:override', payload) as Promise<CategoryRulesPayload>,
-  rules: () => ipcRenderer.invoke('rules:get') as Promise<CategoryRulesPayload>
+    trackedInvoke('categorization:override', payload) as Promise<CategoryRulesPayload>,
+  rules: () => trackedInvoke('rules:get') as Promise<CategoryRulesPayload>
 };
 
 const categories = {
-  list: () => ipcRenderer.invoke('categories:list') as Promise<CustomCategoriesPayload>,
+  list: () => trackedInvoke('categories:list') as Promise<CustomCategoriesPayload>,
   add: (category: { name: string; bucket: 'income' | 'expense' | 'transfer'; nettingEnabled?: boolean }) =>
-    ipcRenderer.invoke('categories:add', category) as Promise<CustomCategoriesPayload>
+    trackedInvoke('categories:add', category) as Promise<CustomCategoriesPayload>
 };
 
 const advisor = {
-  ask: (question: string) => ipcRenderer.invoke('advisor:ask', question) as Promise<AdvisorResponse>,
-  savingsPlan: () => ipcRenderer.invoke('advisor:savings-plan') as Promise<SavingsPlan>
+  ask: (question: string) => trackedInvoke('advisor:ask', question) as Promise<AdvisorResponse>,
+  savingsPlan: () => trackedInvoke('advisor:savings-plan') as Promise<SavingsPlan>
 };
 
 const backup = {
-  create: () => ipcRenderer.invoke('backup:create') as Promise<BackupRecord>,
-  history: () => ipcRenderer.invoke('backup:history') as Promise<BackupHistory>,
-  restore: (backupId: string) => ipcRenderer.invoke('backup:restore', backupId) as Promise<void>
+  create: () => trackedInvoke('backup:create') as Promise<BackupRecord>,
+  history: () => trackedInvoke('backup:history') as Promise<BackupHistory>,
+  restore: (backupId: string) => trackedInvoke('backup:restore', backupId) as Promise<void>
 };
 
 const exportData = {
-  generate: () => ipcRenderer.invoke('export:data') as Promise<ExportPayload>
+  generate: () => trackedInvoke('export:data') as Promise<ExportPayload>
 };
 
 const workspace = {
-  clear: () => ipcRenderer.invoke('workspace:clear') as Promise<void>,
-  list: () => ipcRenderer.invoke('workspace:list') as Promise<WorkspaceRegistry>,
-  create: (name: string) => ipcRenderer.invoke('workspace:create', name) as Promise<WorkspaceRegistryEntry>,
-  select: (workspaceId: string) => ipcRenderer.invoke('workspace:select', workspaceId) as Promise<void>
+  clear: () => trackedInvoke('workspace:clear') as Promise<void>,
+  list: () => trackedInvoke('workspace:list') as Promise<WorkspaceRegistry>,
+  create: (name: string) => trackedInvoke('workspace:create', name) as Promise<WorkspaceRegistryEntry>,
+  delete: (workspaceId: string) => trackedInvoke('workspace:delete', workspaceId) as Promise<WorkspaceRegistry>,
+  select: (workspaceId: string) => trackedInvoke('workspace:select', workspaceId) as Promise<void>
+};
+
+const diagnostics = {
+  reportError: (message: string, stack?: string) =>
+    ipcRenderer.invoke('diagnostics:renderer-action-failed', { channel: 'renderer', message, stack }) as Promise<void>
 };
 
 // The only main -> renderer push channel (everything else above is renderer-initiated
@@ -151,5 +172,6 @@ contextBridge.exposeInMainWorld('ledgerPilot', {
   backup,
   exportData,
   workspace,
+  diagnostics,
   menuEvents
 });

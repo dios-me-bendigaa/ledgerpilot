@@ -35,8 +35,8 @@ export const CategorizePage = () => {
     <div>
       <PageHeader
         eyebrow="Categorize"
-        title="Review &amp; teach the AI"
-        description="Ambiguous transactions land here. Correcting one applies to every transaction from the same merchant, now and in future imports."
+        title="Review your categories"
+        description="Create categories that fit your life, then approve each transaction suggestion. Nothing is categorized automatically."
         actions={
           <>
             <Button variant="secondary" disabled={isWorking || reviewTransactions.length === 0} onClick={() => void handleSuggestCategories()} icon={<Sparkles />}>
@@ -59,7 +59,7 @@ export const CategorizePage = () => {
           </div>
 
           <div className="mt-5 rounded-2xl bg-slate-950/60 p-4">
-            <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Add custom category</p>
+            <p className="text-xs uppercase tracking-[0.15em] text-slate-500">My Categories</p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Input
                 className="min-w-0 flex-1"
@@ -95,7 +95,7 @@ export const CategorizePage = () => {
                   </Badge>
                 ))}
               </div>
-            ) : null}
+            ) : <p className="mt-3 text-xs text-slate-500">Start with a category such as groceries, rent, freelance income, or anything meaningful to you.</p>}
           </div>
 
           <div className="mt-5 space-y-3">

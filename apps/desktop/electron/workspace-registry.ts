@@ -115,6 +115,19 @@ export const createWorkspace = async (appRoot: string, name: string): Promise<Wo
   return entry;
 };
 
+// Deletion is intentionally explicit in the UI (two-click confirmation). Removing an app bundle
+// must never erase user finances, but users need a supported way to delete old test workspaces.
+export const deleteWorkspace = async (appRoot: string, workspaceId: string): Promise<WorkspaceRegistry> => {
+  const registry = await loadRegistry(appRoot);
+  if (!registry.workspaces.some((workspace) => workspace.id === workspaceId)) {
+    throw new Error('Workspace not found.');
+  }
+  await fs.rm(getWorkspacePath(appRoot, workspaceId), { recursive: true, force: true });
+  const next = { workspaces: registry.workspaces.filter((workspace) => workspace.id !== workspaceId) };
+  await saveRegistry(appRoot, next);
+  return next;
+};
+
 export const touchWorkspace = async (appRoot: string, workspaceId: string): Promise<void> => {
   const registry = await loadRegistry(appRoot);
   const target = registry.workspaces.find((workspace) => workspace.id === workspaceId);
