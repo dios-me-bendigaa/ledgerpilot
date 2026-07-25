@@ -32,7 +32,7 @@ export const Sidebar = () => {
   const mainNav: NavEntry[] = [
     { key: 'overview', label: 'Overview', icon: LayoutDashboard },
     { key: 'transactions', label: 'Transactions', icon: Wallet },
-    { key: 'categorize', label: 'Categorize', icon: ListChecks, badge: reviewTransactions.length },
+    { key: 'categorize', label: 'AI Review', icon: ListChecks, badge: reviewTransactions.length },
     { key: 'goals', label: 'Goals', icon: Target },
     { key: 'advisor', label: 'Advisor', icon: Bot }
   ];

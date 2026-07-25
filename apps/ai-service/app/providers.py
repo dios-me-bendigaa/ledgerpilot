@@ -128,7 +128,10 @@ def _savings_prompt(request: AdvisorRequest) -> str:
 def _categorize_prompt(transactions_text: str) -> str:
     return (
         f"You are a Canadian personal finance categorization engine.\n"
-        f"Categorize each transaction. Use the account_name as strong context:\n"
+        f"Categorize each transaction and actively look for internal transfers. Use account_name, "
+        f"descriptions containing sent/received, to/from, payment, transfer, and matching amounts/times "
+        f"across the supplied rows as strong context. A likely mirror transfer must be proposed as "
+        f"internal_transfers, never as income or an expense.\n"
         f"  - Credits (positive amounts) in a credit card account -> credit_card_payments\n"
         f"  - Credits (positive amounts) in a line of credit account -> line_of_credit_payments\n"
         f"  - Debits from chequing labeled as LOC/credit-card payment -> same payment category\n\n"
@@ -141,7 +144,7 @@ def _categorize_prompt(transactions_text: str) -> str:
         f"  Transfers: bank_transfers, internal_transfers, interac_e_transfers, investments\n"
         f"  Fallback: unknown\n\n"
         f"{transactions_text}\n\n"
-        f"Reply with JSON array: "
+        f"Only propose a category; do not assume it has been applied. Reply with JSON array: "
         f"[{{transaction_id, category, confidence_score (0-1), rationale}}]"
     )
 

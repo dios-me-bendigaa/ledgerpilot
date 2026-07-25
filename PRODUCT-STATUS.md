@@ -4,7 +4,7 @@ Local-first, AI-assisted personal finance desktop app for macOS. Raw financial d
 on-device by default. This file tracks **what works today** vs **the desired end state** for the
 final version. Update it as functionality lands.
 
-_Last updated: 2026-07-25 · Version: 3.2.1_
+_Last updated: 2026-07-25 · Version: 3.3.0_
 
 ---
 
@@ -67,6 +67,9 @@ _Last updated: 2026-07-25 · Version: 3.2.1_
 - A connected provider prepares reviewable category proposals automatically after each import; a
   person must approve each change. Approving a new proposal explicitly creates it in My Categories,
   and transaction direction selects an income or expense default.
+- The AI Review centre surfaces proposals, pending items, and category progress immediately after
+  import. Cloud advisor/optimizer requests include merchant-level evidence from up to 1,000 recent
+  transactions; transfer proposals consider matching amounts, timing, and to/from descriptions.
 
 ### Goals, advisor & optimizer
 - Real goal-creation form (not blind-create-then-edit), read-only goal cards with live progress

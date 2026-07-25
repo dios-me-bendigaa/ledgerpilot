@@ -522,8 +522,9 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
     if (!name || name === 'unknown') return;
     setIsWorking(true);
     try {
+      const systemTransfer = ['internal_transfers', 'bank_transfers', 'interac_e_transfers', 'credit_card_payments', 'line_of_credit_payments'].includes(name);
       const existing = customCategories.some((entry) => entry.name === name);
-      if (!existing) {
+      if (!existing && !systemTransfer) {
         const next = await window.ledgerPilot.categories.add({
           name,
           bucket: transaction.amount >= 0 ? 'income' : 'expense'
@@ -533,7 +534,7 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
       await window.ledgerPilot.categorization.override({ transactionId: transaction.id, merchantNormalized: transaction.merchantNormalized, category: name });
       await loadWorkspaceState();
       setCategorySuggestions((current) => ({ suggestions: current.suggestions.filter((suggestion) => suggestion.transactionId !== transaction.id) }));
-      toast.success(`Approved ${name.replaceAll('_', ' ')} for this merchant.`);
+      toast.success(systemTransfer ? 'Approved as a transfer or account payment; it is excluded from income and spending.' : `Approved ${name.replaceAll('_', ' ')} for this merchant.`);
     } catch (nextError) {
       toast.error(nextError instanceof Error ? nextError.message : 'Failed to approve the proposed category.');
     } finally {

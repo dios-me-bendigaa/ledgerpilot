@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.3.0 — 2026-07-25
+
+### AI experience
+
+- Added a dedicated AI Review centre that shows AI proposals, pending reviews, and personal category progress after every import.
+- Cloud AI now receives a much larger transaction history, concrete merchant totals, and transaction evidence for more grounded advisor and goal-optimizer responses.
+- Updated the OpenAI default from the mini model to `gpt-5` for higher-quality analysis; existing users can still choose a different model in AI Settings.
+- AI now explicitly evaluates matching amounts, timestamps, and to/from language when proposing transfer classifications. Approved transfer proposals are excluded from income and spending.
+
+### Dashboard
+
+- Replaced the opaque health scorecard with a direct next-best-action panel.
+- Preserved user-created category names in expense groups, so `groceries` no longer appears as a misleading `Food` group.
+
 ## v3.2.1 — 2026-07-25
 
 ### AI and overview

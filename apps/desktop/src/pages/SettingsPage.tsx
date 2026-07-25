@@ -34,7 +34,7 @@ export const SettingsPage = () => {
       provider === 'ollama'
         ? { ...settings.providerSettings, ollamaModel: 'llama3.1', apiBaseUrl: 'http://127.0.0.1:11434' }
         : provider === 'openai-compatible'
-          ? { ...settings.providerSettings, cloudModel: 'gpt-5-mini', apiBaseUrl: 'https://api.openai.com' }
+          ? { ...settings.providerSettings, cloudModel: 'gpt-5', apiBaseUrl: 'https://api.openai.com' }
           : provider === 'claude'
             ? { ...settings.providerSettings, cloudModel: 'claude-sonnet-4-20250514', apiBaseUrl: 'https://api.anthropic.com' }
             : { ...settings.providerSettings, localModel: 'rule-engine', apiBaseUrl: undefined };

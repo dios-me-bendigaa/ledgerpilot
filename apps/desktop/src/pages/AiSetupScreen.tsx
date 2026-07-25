@@ -41,7 +41,7 @@ const providerOptions: ProviderOption[] = [
     description: 'Uses an OpenAI API key or a compatible chat-completions endpoint. ChatGPT subscriptions do not include API usage.',
     needsApiKey: true,
     needsBaseUrl: true,
-    defaultModel: 'gpt-5-mini',
+    defaultModel: 'gpt-5',
     defaultBaseUrl: 'https://api.openai.com'
   },
   {

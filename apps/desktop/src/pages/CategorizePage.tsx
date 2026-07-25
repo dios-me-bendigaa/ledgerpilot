@@ -34,9 +34,9 @@ export const CategorizePage = () => {
   return (
     <div>
       <PageHeader
-        eyebrow="Categorize"
-        title="Review your categories"
-        description="AI proposals are prepared after import when a provider is connected. Review each one before it changes a transaction or future merchant rule."
+        eyebrow="AI processing centre"
+        title="AI has prepared your review"
+        description="Your provider analyzes imports, finds transaction patterns, and proposes categories or transfers. You stay in control: approve only what looks right."
         actions={
           <>
             <Button variant="secondary" disabled={isWorking || reviewTransactions.length === 0} onClick={() => void handleSuggestCategories()} icon={<Sparkles />}>
@@ -96,6 +96,12 @@ export const CategorizePage = () => {
                 ))}
               </div>
             ) : <p className="mt-3 text-xs text-slate-500">Start with a category such as groceries, rent, freelance income, or anything meaningful to you.</p>}
+          </div>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <div className="rounded-xl bg-sky-500/5 p-3"><p className="text-[11px] uppercase tracking-wide text-sky-300">AI proposals</p><p className="mt-1 text-lg font-semibold text-slate-100">{categorySuggestions.suggestions.filter((entry) => entry.suggestedCategory !== 'unknown').length}</p></div>
+            <div className="rounded-xl bg-amber-500/5 p-3"><p className="text-[11px] uppercase tracking-wide text-amber-300">Needs your review</p><p className="mt-1 text-lg font-semibold text-slate-100">{reviewTransactions.length}</p></div>
+            <div className="rounded-xl bg-emerald-500/5 p-3"><p className="text-[11px] uppercase tracking-wide text-emerald-300">Your categories</p><p className="mt-1 text-lg font-semibold text-slate-100">{customCategories.length}</p></div>
           </div>
 
           <div className="mt-5 space-y-3">
@@ -183,6 +189,7 @@ const ReviewRow = ({
   const suggestion = categorySuggestions.suggestions.find((entry) => entry.transactionId === transaction.id);
   const proposal = suggestion?.suggestedCategory;
   const isProposedNewCategory = Boolean(proposal && proposal !== 'unknown' && !customCategories.some((category) => category.name === proposal));
+  const isTransferProposal = ['internal_transfers', 'bank_transfers', 'interac_e_transfers', 'credit_card_payments', 'line_of_credit_payments'].includes(proposal ?? '');
 
   return (
     <div className="rounded-2xl bg-slate-950/70 p-4 text-sm transition-colors hover:bg-slate-950/90">
@@ -225,7 +232,7 @@ const ReviewRow = ({
       {suggestion && suggestion.suggestedCategory !== 'unknown' ? (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-sky-400">
           <span>{suggestion.rationale}</span>
-          {isProposedNewCategory ? <Button size="sm" variant="secondary" disabled={isWorking} onClick={() => void handleApproveProposedCategory(transaction, suggestion.suggestedCategory)}>Approve &amp; add “{suggestion.suggestedCategory.replaceAll('_', ' ')}”</Button> : null}
+          {isProposedNewCategory ? <Button size="sm" variant="secondary" disabled={isWorking} onClick={() => void handleApproveProposedCategory(transaction, suggestion.suggestedCategory)}>{isTransferProposal ? 'Approve as transfer' : `Approve & add “${suggestion.suggestedCategory.replaceAll('_', ' ')}”`}</Button> : null}
         </div>
       ) : null}
     </div>

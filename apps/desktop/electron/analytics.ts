@@ -47,6 +47,7 @@ const sqlList = (categories: readonly string[]) => categories.map((c) => `'${c.r
 // registration: anything negative that is not income/transfer/unknown counts as expense.
 let extraIncome: string[] = [];
 let extraTransfer: string[] = [];
+let customCategoryNames: string[] = [];
 // Categories whose positive-amount transactions net against their own negative-amount
 // transactions when computing spend aggregates (e.g. a remittance sent out, partly reimbursed
 // back in — both legitimately belong to the same category, and only the net matters for
@@ -59,6 +60,7 @@ export const setCustomCategoryBuckets = (
 ) => {
   extraIncome = customs.filter((c) => c.bucket === 'income').map((c) => c.name);
   extraTransfer = customs.filter((c) => c.bucket === 'transfer').map((c) => c.name);
+  customCategoryNames = customs.map((c) => c.name);
   const customNetting = customs.filter((c) => c.nettingEnabled).map((c) => c.name);
   nettingCategories = [...new Set(['india_expenses', ...customNetting])];
 };
@@ -151,7 +153,9 @@ const getExpenseGroups = (database: Database.Database): GroupTotal[] => {
 
   const groups = new Map<string, CategoryTotal[]>();
   for (const row of rows) {
-    const group = groupForCategory(row.category);
+    // A user-created label is already the clearest group. Do not translate "groceries" into a
+    // hidden preset group such as "Food" — that makes a reviewed category look wrong again.
+    const group = customCategoryNames.includes(row.category) ? row.category.replaceAll('_', ' ') : groupForCategory(row.category);
     const bucket = groups.get(group) ?? [];
     bucket.push({ category: row.category, total: roundCurrency(row.total) });
     groups.set(group, bucket);

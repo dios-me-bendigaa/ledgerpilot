@@ -80,26 +80,14 @@ export const OverviewPage = () => {
         <Card className="bg-slate-900/70 p-7">
           <div className="flex items-center gap-2">
             <HeartPulse className="h-4 w-4 text-emerald-400" />
-            <p className="text-sm uppercase tracking-[0.2em] text-emerald-300">Health scorecard</p>
+            <p className="text-sm uppercase tracking-[0.2em] text-emerald-300">Your next best move</p>
           </div>
           <div className="mt-5 space-y-5">
             <div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-400">Budget health</span>
-                <span className="font-medium text-slate-200">{kpis.budgetHealth.toFixed(0)}/100</span>
-              </div>
-              <Meter className="mt-2" value={kpis.budgetHealth} tone={kpis.budgetHealth >= 60 ? 'success' : kpis.budgetHealth >= 35 ? 'warning' : 'danger'} />
-            </div>
-            <div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-400">Financial health score</span>
-                <span className="font-medium text-slate-200">{kpis.financialHealthScore.toFixed(0)}/100</span>
-              </div>
-              <Meter
-                className="mt-2"
-                value={kpis.financialHealthScore}
-                tone={kpis.financialHealthScore >= 60 ? 'success' : kpis.financialHealthScore >= 35 ? 'warning' : 'danger'}
-              />
+              <p className="text-sm leading-6 text-slate-200">
+                {kpis.reviewCount > 0 ? `First, review ${kpis.reviewCount} AI proposals so your reports use categories you trust.` : kpis.netCashFlow >= 0 ? 'You are spending less than you bring in. Choose one goal and move part of what is left over toward it.' : 'Your spending is higher than your income. Review the largest spending area and set one realistic reduction for next month.'}
+              </p>
+              <p className="mt-2 text-xs leading-5 text-slate-500">This replaces a vague score with a concrete next step based on your actual imported data.</p>
             </div>
             <div className="grid grid-cols-5 gap-2 pt-1">
               {[
