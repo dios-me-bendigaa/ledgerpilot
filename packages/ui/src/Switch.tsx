@@ -35,12 +35,12 @@ export const Switch = ({ checked, onChange, label, description, disabled = false
   if (!label) return track;
 
   return (
-    <label className="flex cursor-pointer items-center justify-between gap-4 rounded-2xl bg-slate-950/80 px-4 py-3">
+    <div className="flex items-center justify-between gap-4 rounded-2xl bg-slate-950/80 px-4 py-3">
       <div>
         <p className="text-sm text-slate-200">{label}</p>
         {description ? <p className="mt-0.5 text-xs text-slate-500">{description}</p> : null}
       </div>
       {track}
-    </label>
+    </div>
   );
 };

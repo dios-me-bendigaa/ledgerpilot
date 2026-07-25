@@ -311,17 +311,10 @@ describe('multi-bank 30-day fixture set (Scotia + NBC + CIBC)', () => {
 
     const madina = cibcRows.find((t) => t.descriptionRaw.includes('MADINA GROCER AND HALA WINNIPEG, MB'));
     expect(madina).toBeDefined();
-    // KNOWN LIMITATION, not fixed by this change: CIBC's export has no sign convention at all —
-    // every amount is a positive "amount charged" regardless of account type. There is no
-    // existing mechanism that flips a positive amount to an expense based on "this looks like a
-    // credit-card-charges-only file", so today this resolves to the literal positive value from
-    // the CSV. That means an unmodified positive amount in an 'unknown' category would currently
-    // bucket as INCOME on the dashboard (see spendBucket) — a real follow-up issue, deliberately
-    // NOT addressed here since a safe fix needs its own careful design (e.g. detecting single-
-    // positive-amount-column credit card formats specifically, without misclassifying genuinely
-    // signed formats). Asserting the CURRENT literal behavior so this gap stays visible/tracked
-    // rather than silently masked by an assumption that isn't actually implemented yet.
-    expect(madina?.amount).toBeCloseTo(13.37, 2);
+    // CIBC's headerless credit-card export reports charges as positive "amount charged" values.
+    // LedgerPilot normalizes them to its standard negative-outflow convention so they appear in
+    // expense totals instead of disappearing from the overview.
+    expect(madina?.amount).toBeCloseTo(-13.37, 2);
     // Every row from a header-less file is flagged for review — the column mapping was guessed
     // positionally, not confirmed, same treatment as a ragged/malformed row.
     expect(madina?.requiresReview).toBe(true);

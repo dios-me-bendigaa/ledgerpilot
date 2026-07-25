@@ -19,18 +19,25 @@ jobs:
         include:
           - target_arch: arm64
             python_arch: arm64
+            runner: macos-15
+            mach_o_arch: arm64
           - target_arch: x64
             python_arch: x64
-    runs-on: macos-15
+            runner: macos-15-intel
+            mach_o_arch: x86_64
+    # `macos-15` is Apple Silicon. Building the x64 Electron shell there is fine, but
+    # PyInstaller emits a native ARM sidecar, which Intel Macs cannot spawn (error -86).
+    # Build each release on a runner matching the architecture of its bundled sidecar.
+    runs-on: ${{ matrix.runner }}
     env:
       TARGET_ARCH: ${{ matrix.target_arch }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -39,7 +46,7 @@ jobs:
         run: npm install
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           architecture: ${{ matrix.python_arch }}
@@ -61,6 +68,11 @@ jobs:
             --specpath /tmp/pyinstaller-spec \
             --noconfirm
 
+      - name: Verify bundled sidecar architecture
+        run: |
+          file apps/ai-service/dist/ledgerpilot-ai
+          lipo -archs apps/ai-service/dist/ledgerpilot-ai | grep -qw '${{ matrix.mach_o_arch }}'
+
       - name: Package desktop app
         working-directory: apps/desktop
         run: npm run build && npx electron-builder --mac dmg --$TARGET_ARCH
@@ -69,7 +81,7 @@ jobs:
         run: ls apps/desktop/release
 
       - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: dmg-${{ matrix.target_arch }}
           path: apps/desktop/release/*.dmg
@@ -83,7 +95,7 @@ jobs:
 
     steps:
       - name: Download DMG artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           pattern: dmg-*
           path: dist

@@ -448,17 +448,17 @@ export const WorkspaceProvider = ({ children }: PropsWithChildren) => {
     if (nonUnknown.length === 0) return;
     setIsWorking(true);
     try {
-      await Promise.all(
-        nonUnknown.map((suggestion) => {
-          const tx = reviewTransactions.find((t) => t.id === suggestion.transactionId);
-          if (!tx) return Promise.resolve();
-          return window.ledgerPilot.categorization.override({
-            transactionId: suggestion.transactionId,
-            merchantNormalized: tx.merchantNormalized,
-            category: suggestion.suggestedCategory
-          });
-        }),
-      );
+      // Each accepted suggestion updates the shared category-rules file. Running all writes at
+      // once can interleave writes on disk and leave invalid JSON behind; serialize them instead.
+      for (const suggestion of nonUnknown) {
+        const tx = reviewTransactions.find((transaction) => transaction.id === suggestion.transactionId);
+        if (!tx) continue;
+        await window.ledgerPilot.categorization.override({
+          transactionId: suggestion.transactionId,
+          merchantNormalized: tx.merchantNormalized,
+          category: suggestion.suggestedCategory
+        });
+      }
       await loadWorkspaceState();
       setCategorySuggestions({ suggestions: [] });
       toast.success(`Applied ${nonUnknown.length} categor${nonUnknown.length === 1 ? 'y' : 'ies'}.`);

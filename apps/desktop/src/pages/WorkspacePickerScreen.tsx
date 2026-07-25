@@ -41,6 +41,11 @@ export const WorkspacePickerScreen = () => {
           Each workspace keeps its own transactions, goals, and settings completely separate — useful for personal vs.
           family finances, or simply testing something without touching your real data.
         </p>
+        {workspaces.length > 0 ? (
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            Existing workspaces are stored on this Mac and remain available after updating or reinstalling LedgerPilot.
+          </p>
+        ) : null}
 
         {workspaces.length > 0 ? (
           <div className="mt-6 space-y-2.5">

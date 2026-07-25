@@ -59,7 +59,11 @@ export const readJsonFile = async <T>(filePath: string, fallback: T): Promise<T>
 
 export const writeJsonFile = async (filePath: string, payload: unknown) => {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8');
+  // Writing via a sibling file then renaming keeps a crash or concurrent reader from ever seeing
+  // a truncated JSON document. The rename is atomic because both paths are in the same directory.
+  const temporaryPath = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  await fs.writeFile(temporaryPath, JSON.stringify(payload, null, 2), 'utf8');
+  await fs.rename(temporaryPath, filePath);
 };
 
 const getSettingsPath = (workspaceRoot: string) => path.join(workspaceRoot, 'settings', settingsFileName);

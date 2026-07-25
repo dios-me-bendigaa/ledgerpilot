@@ -681,6 +681,11 @@ const parseRecordRows = async (
   const headers = hasRealHeader ? firstRow : positionalHeaderGuess(firstRow.length);
   const rows = hasRealHeader ? remainingRows : parsed;
   const sourceFormat = detectSourceFormat(headers);
+  // CIBC credit-card exports have no header and represent a card charge as a positive number.
+  // The rest of LedgerPilot consistently represents money leaving an account as negative, so
+  // normalize this known export shape before category and dashboard calculations. The filename
+  // guard prevents us from guessing the sign of an arbitrary headerless CSV.
+  const isHeaderlessCibcCreditCardExport = !hasRealHeader && /cibc/i.test(record.fileName);
   logger?.(
     `parseRecordRows file="${record.fileName}" delimiter="${delimiter}" rawHeaderCount=${headers.length} ` +
     `headers="${headers.slice(0, 8).join('|')}" format=${sourceFormat} ` +
@@ -819,6 +824,10 @@ const parseRecordRows = async (
     if (!hasRealHeader && !parseWarning) {
       parseWarning =
         'This file has no header row; column meaning (date/description/amount) was guessed positionally — please verify.';
+    }
+
+    if (isHeaderlessCibcCreditCardExport && amount > 0) {
+      amount = -amount;
     }
 
     if (!isFiniteNonZero(amount)) {

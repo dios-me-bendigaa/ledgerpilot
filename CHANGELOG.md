@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.1.1 — 2026-07-25
+
+### Fixed
+
+- Built the Intel DMG on an Intel runner so the bundled AI sidecar launches correctly on Intel Macs.
+- Made bulk category acceptance safe: rule writes are atomic, bulk updates are serialized, and affected rule files recover automatically.
+- Normalized headerless CIBC credit-card charges as spending so expense and overview totals are accurate.
+- Corrected the settings switch interaction and clarified that existing workspaces persist across app reinstalls.
+- Updated GitHub Actions to versions compatible with the Node.js 24 runner runtime.
+
 ## v3.1.0 — 2026-07-24
 
 ### Startup and workspaces

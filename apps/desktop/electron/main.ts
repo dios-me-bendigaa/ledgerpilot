@@ -54,7 +54,8 @@ import {
   restoreSettingsAndGoals,
   saveSettings,
   settingsFileExists,
-  upsertGoal
+  upsertGoal,
+  writeJsonFile
 } from './local-state.js';
 import { createWorkspace, getWorkspacePath, loadRegistry, migrateLegacyWorkspaceIfNeeded, touchWorkspace } from './workspace-registry.js';
 
@@ -371,10 +372,65 @@ const readNormalizationReports = async (): Promise<NormalizationHistory> => {
   }
 };
 
+// Older builds could issue many category writes at once from "Accept all". A few affected
+// workspaces contain two complete JSON documents concatenated together. Recover every complete
+// top-level object we can find, merge their rules, and immediately rewrite one valid file.
+const recoverConcatenatedCategoryRules = (content: string): CategoryRulesPayload | undefined => {
+  const recovered: CategoryRulesPayload[] = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === '{') {
+      if (depth === 0) start = index;
+      depth += 1;
+    } else if (character === '}' && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        try {
+          const candidate = JSON.parse(content.slice(start, index + 1)) as Partial<CategoryRulesPayload>;
+          if (Array.isArray(candidate.rules)) recovered.push({ rules: candidate.rules });
+        } catch {
+          // Keep scanning: another complete document may still be recoverable.
+        }
+        start = -1;
+      }
+    }
+  }
+
+  if (recovered.length === 0) return undefined;
+  const byMerchant = new Map<string, CategoryRulesPayload['rules'][number]>();
+  for (const payload of recovered) {
+    for (const rule of payload.rules) byMerchant.set(rule.merchantPattern, rule);
+  }
+  return { rules: [...byMerchant.values()] };
+};
+
 const readCategoryRules = async (): Promise<CategoryRulesPayload> => {
   try {
     const content = await fs.readFile(getCategoryRulesPath(), 'utf8');
-    return JSON.parse(content) as CategoryRulesPayload;
+    try {
+      return JSON.parse(content) as CategoryRulesPayload;
+    } catch (error) {
+      const recovered = recoverConcatenatedCategoryRules(content);
+      if (!recovered) throw error;
+      await writeJsonFile(getCategoryRulesPath(), recovered);
+      void writeLog(`category rules recovered after concurrent write; restored ${recovered.rules.length} rule(s)`);
+      return recovered;
+    }
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
     if (nodeError.code === 'ENOENT') {
@@ -386,8 +442,7 @@ const readCategoryRules = async (): Promise<CategoryRulesPayload> => {
 };
 
 const writeCategoryRules = async (payload: CategoryRulesPayload) => {
-  await fs.mkdir(path.dirname(getCategoryRulesPath()), { recursive: true });
-  await fs.writeFile(getCategoryRulesPath(), JSON.stringify(payload, null, 2), 'utf8');
+  await writeJsonFile(getCategoryRulesPath(), payload);
 };
 
 const readCustomCategories = async (): Promise<CustomCategoriesPayload> => {
